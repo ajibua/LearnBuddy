@@ -1,0 +1,62 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LearnBuddy - Your AI Study Assistant</title>
+    <link rel="stylesheet" href="{% static 'css/landing.css' %}">
+</head>
+<body data-authenticated="{% if is_authenticated %}true{% else %}false{% endif %}">
+    <div class="landing-container">
+        <div class="content-wrapper">
+            <!-- Greeting Text -->
+            <div class="greeting-section">
+                <h1 class="greeting-text" id="greetingText">
+                    {% if is_authenticated %}
+                        Welcome, {{ user.first_name|default:user.username }}!
+                    {% else %}
+                        Good morning!
+                    {% endif %}
+                </h1>
+                <p class="subtitle">Your personal AI study assistant is ready to help</p>
+            </div>
+
+            <!-- Textarea Section -->
+            <div class="textarea-section">
+                <div class="input-box">
+                    <textarea 
+                        id="landingInput" 
+                        class="landing-textarea" 
+                        placeholder="Ask me anything about your studies..." 
+                        oninput="autoResizeTextarea(this)"
+                    ></textarea>
+                    <button class="send-btn" onclick="handleLandingInput()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Links -->
+            <div class="quick-links">
+                <button class="quick-btn" onclick="quickAction('upload')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                    Upload Material
+                </button>
+                <button class="quick-btn" onclick="quickAction('auth')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/>
+                    </svg>
+                    Sign In
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{% static 'js/landing.js' %}"></script>
+</body>
+</html>

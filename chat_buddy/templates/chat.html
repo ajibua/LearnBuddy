@@ -1,0 +1,118 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LearnBuddy</title>
+    <link rel="stylesheet" href="{%static 'css/style.css'%}">
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <div class="logo">LearnBuddy</div>
+        <button class="toggle-btn" onclick="toggleSidebar()">☰</button>
+    </div>
+        
+        <button class="new-chat-btn" onclick="newSession()">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14"/>
+            </svg>
+            New Chat
+        </button>
+
+        <div class="chat-history" id="chatHistory">
+            <div class="chat-history-item active" onclick="loadChat(0)">
+                <div class="chat-history-title">Current Chat</div>
+                <div class="chat-history-preview">Hello! I'm LearnBuddy...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="chat-container">
+            <div class="messages" id="messages">
+                <div class="message assistant">
+                    Hello! I'm LearnBuddy, your AI study assistant. Upload your study material to get started, or ask me anything!
+                </div>
+            </div>
+
+            <div class="input-wrapper">
+                <!-- Upload Panel -->
+                <div class="popup-panel" id="uploadPanel">
+                    <div class="popup-header">
+                        <div class="popup-title">Upload Study Material</div>
+                        <button class="close-popup" onclick="closePanel('uploadPanel')">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 6L6 18M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <input type="file" id="fileInput" class="file-input" accept=".pdf, .jpg, .jpeg, .png, .gif, .bmp, .webp, .txt, .docx, .doc" onchange="handleFileSelect(event)">
+                    <label for="fileInput" class="file-label">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 0.5rem;">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                        </svg>
+                        <div>Click to upload PDF or Image</div>
+                    </label>
+                    <div class="file-name" id="fileName">No file chosen</div>
+                    <button class="btn btn-primary" onclick="processPDF()">Process PDF</button>
+                </div>
+
+                <!-- Summary Panel -->
+                <div class="popup-panel" id="summaryPanel">
+                    <div class="popup-header">
+                        <div class="popup-title">Material Summary</div>
+                        <button class="close-popup" onclick="closePanel('summaryPanel')">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 6L6 18M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="summary-content" id="summaryContent">
+                        No material loaded yet. Upload a document to see the summary here.
+                    </div>
+                </div>
+
+                <div class="input-area">
+                    <!-- Action Buttons -->
+                    <div class="input-actions">
+                        <button class="action-btn" data-tooltip="Upload PDF" onclick="togglePanel('uploadPanel')">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                            </svg>
+                        </button>
+                        <button class="action-btn" data-tooltip="Upload Image" onclick="document.getElementById('imageFileInput').click()">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                <circle cx="8.5" cy="8.5" r="1.5"/>
+                                <polyline points="21 15 16 10 5 21"/>
+                            </svg>
+                        </button>
+                        <input type="file" id="imageFileInput" class="file-input" accept=".jpg, .jpeg, .png, .gif, .bmp, .webp" onchange="handleImageUpload(event)" style="display: none;">
+                        <button class="action-btn" data-tooltip="View Summary" onclick="togglePanel('summaryPanel')" id="summaryBtn">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                            </svg>
+                            <span class="badge" id="summaryBadge" style="display: none;">1</span>
+                        </button>
+                    </div>
+
+                    <textarea class="message-input" id="messageInput" placeholder="Ask a question about your study material..." rows="1" oninput="autoResizeTextarea(this)"></textarea>
+                    
+                    <button class="send-btn" onclick="sendMessage()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{% static 'js/chat.js' %}"></script>
+</body>
+</html>

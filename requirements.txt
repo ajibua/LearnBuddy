@@ -1,0 +1,9 @@
+django 
+djangorestframework 
+google-genai 
+python-dotenv 
+django-cors-headers
+PyPDF2
+pytesseract
+Pillow
+pdf2image
