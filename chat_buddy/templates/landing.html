@@ -47,12 +47,21 @@
                     </svg>
                     Upload Material
                 </button>
-                <button class="quick-btn" onclick="quickAction('auth')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/>
-                    </svg>
-                    Sign In
-                </button>
+                {% if is_authenticated %}
+                    <button class="quick-btn" onclick="quickAction('logout')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1"/>
+                        </svg>
+                        Sign Out
+                    </button>
+                {% else %}
+                    <button class="quick-btn" onclick="quickAction('auth')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/>
+                        </svg>
+                        Sign In
+                    </button>
+                {% endif %}
             </div>
         </div>
     </div>

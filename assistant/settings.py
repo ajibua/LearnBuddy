@@ -22,12 +22,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-skhujb8shttzz1ij74dhs4auh@7%@*c+*1+b_nqy&95p27)cor'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-skhujb8shttzz1ij74dhs4auh@7%@*c+*1+b_nqy&95p27)cor')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Default to True for development, set DEBUG=False in production environment
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = []
+# Allow Railway domain, localhost, and custom domain
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '.railway.app',  # Railway default domains
+    'learnbuddy.com',  # Your custom domain
+    'www.learnbuddy.com',  # With www subdomain
+    os.getenv('RAILWAY_STATIC_URL', '').replace('http://', '').replace('https://', '').split('/')[0] if os.getenv('RAILWAY_STATIC_URL') else '',
+    os.getenv('DOMAIN', '')  # Custom domain from env variable
+]
+ALLOWED_HOSTS = [h for h in ALLOWED_HOSTS if h]  # Remove empty strings
 
 
 # Application definition
@@ -44,6 +55,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -73,7 +85,7 @@ WSGI_APPLICATION = 'assistant.wsgi.application'
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -125,3 +137,41 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [
     BASE_DIR / 'chat_buddy' / 'static'
 ]
+
+# WhiteNoise static file cache control (1 year)
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Security Settings for Production
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_BROWSER_XSS_FILTER = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_CONTENT_SECURITY_POLICY = {
+        'default-src': ("'self'",),
+        'script-src': ("'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'),
+        'style-src': ("'self'", "'unsafe-inline'",),
+        'img-src': ("'self'", 'data:', 'https:'),
+    }
+
+# Default auto field
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+}

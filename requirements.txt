@@ -1,9 +1,27 @@
-django 
-djangorestframework 
-google-genai 
-python-dotenv 
-django-cors-headers
-PyPDF2
-pytesseract
-Pillow
-pdf2image
+# Core Django
+Django==6.0
+django-rest-framework==3.14.0
+django-cors-headers==4.3.1
+
+# AI & APIs
+google-generativeai==0.3.0
+python-dotenv==1.0.0
+
+# Document Processing
+PyPDF2==3.0.1
+pytesseract==0.3.10
+Python-Docx==0.8.11
+Pillow==10.1.0
+pdf2image==1.16.3
+
+# Web & Search
+beautifulsoup4==4.12.2
+aiohttp==3.9.1
+requests==2.31.0
+
+# Production Server
+gunicorn==21.2.0
+whitenoise==6.6.0
+
+# Database (SQLite built-in, add these for PostgreSQL if needed later)
+psycopg2-binary==2.9.9

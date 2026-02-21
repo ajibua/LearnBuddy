@@ -4,115 +4,168 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LearnBuddy</title>
-    <link rel="stylesheet" href="{%static 'css/style.css'%}">
+    <title>LearnBuddy - Chat</title>
+    <link rel="stylesheet" href="{% static 'css/chat-new.css' %}">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <!-- Sidebar -->
-    <div class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-        <div class="logo">LearnBuddy</div>
-        <button class="toggle-btn" onclick="toggleSidebar()">☰</button>
-    </div>
-        
-        <button class="new-chat-btn" onclick="newSession()">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 5v14M5 12h14"/>
-            </svg>
-            New Chat
-        </button>
-
-        <div class="chat-history" id="chatHistory">
-            <div class="chat-history-item active" onclick="loadChat(0)">
-                <div class="chat-history-title">Current Chat</div>
-                <div class="chat-history-preview">Hello! I'm LearnBuddy...</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Main Content -->
-    <div class="main-content">
-        <div class="chat-container">
-            <div class="messages" id="messages">
-                <div class="message assistant">
-                    Hello! I'm LearnBuddy, your AI study assistant. Upload your study material to get started, or ask me anything!
+    <div class="chat-wrapper">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+                    </svg>
+                    <span>LearnBuddy</span>
                 </div>
             </div>
 
-            <div class="input-wrapper">
-                <!-- Upload Panel -->
-                <div class="popup-panel" id="uploadPanel">
-                    <div class="popup-header">
-                        <div class="popup-title">Upload Study Material</div>
-                        <button class="close-popup" onclick="closePanel('uploadPanel')">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M18 6L6 18M6 6l12 12"/>
-                            </svg>
-                        </button>
+            <div class="sidebar-nav">
+                <button class="nav-btn new-chat-btn" onclick="startNewChat()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    <span>New Chat</span>
+                </button>
+            </div>
+
+            <div class="chat-list">
+                <h3 class="chat-list-title">Recent</h3>
+                <div id="chatListContainer" class="chat-items">
+                    <!-- Chat history will be populated here -->
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="profile-btn" onclick="showProfileMenu()">
+                    <div class="avatar">{{ user.first_name|first|default:"U" }}</div>
+                    <div class="user-info">
+                        <div class="username">{{ user.first_name|default:user.username }}</div>
+                        <div class="status-text">Online</div>
                     </div>
-                    <input type="file" id="fileInput" class="file-input" accept=".pdf, .jpg, .jpeg, .png, .gif, .bmp, .webp, .txt, .docx, .doc" onchange="handleFileSelect(event)">
-                    <label for="fileInput" class="file-label">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 0.5rem;">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                    </svg>
+                </button>
+                <div class="profile-menu" id="profileMenu">
+                    <a href="{% url 'logout' %}" class="menu-item">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1"/>
                         </svg>
-                        <div>Click to upload PDF or Image</div>
-                    </label>
-                    <div class="file-name" id="fileName">No file chosen</div>
-                    <button class="btn btn-primary" onclick="processPDF()">Process PDF</button>
+                        <span>Sign Out</span>
+                    </a>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-main">
+            <!-- Chat Header -->
+            <header class="chat-header">
+                <div class="header-content">
+                    <h1 id="chatTitle">Welcome to LearnBuddy</h1>
+                    <p id="chatSubtitle" class="subtitle">Upload materials and start learning</p>
+                </div>
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+            </header>
+
+            <!-- Messages Container -->
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-section">
+                    <div class="welcome-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+                        </svg>
+                    </div>
+                    <h2>Hey there, {{ user.first_name|default:user.username }}! 👋</h2>
+                    <p>I'm your personal AI study assistant. Upload your study materials to get started.</p>
+                    <div class="quick-actions">
+                        <button type="button" class="action-card" onclick="showUploadPanel()">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2v20M2 12h20"/>
+                            </svg>
+                            <div>
+                                <h3>Upload Material</h3>
+                                <p>PDF, images, and more</p>
+                            </div>
+                        </button>
+                        <button type="button" class="action-card" onclick="document.getElementById('messageInput').focus()">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                            </svg>
+                            <div>
+                                <h3>Ask a Question</h3>
+                                <p>Get instant help</p>
+                            </div>
+                        </button>
+                    </div>
                 </div>
 
-                <!-- Summary Panel -->
-                <div class="popup-panel" id="summaryPanel">
-                    <div class="popup-header">
-                        <div class="popup-title">Material Summary</div>
-                        <button class="close-popup" onclick="closePanel('summaryPanel')">
+                <!-- Messages will be rendered here -->
+                <div id="messagesList"></div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-section">
+                <!-- Upload Panel -->
+                <div class="upload-panel" id="uploadPanel">
+                    <div class="upload-content">
+                        <button type="button" class="close-btn" onclick="closeUploadPanel()">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 6L6 18M6 6l12 12"/>
                             </svg>
                         </button>
-                    </div>
-                    <div class="summary-content" id="summaryContent">
-                        No material loaded yet. Upload a document to see the summary here.
+                        <h3>Upload Study Material</h3>
+                        <p>Drag and drop or click to select</p>
+                        <div class="upload-area" id="uploadArea">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                            </svg>
+                            <p>PDFs, Images, and Documents</p>
+                            <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.gif,.doc,.docx,.txt" style="display:none">
+                        </div>
+                        <div class="file-info" id="fileInfo" style="display:none;">
+                            <div class="file-preview">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                </svg>
+                                <div>
+                                    <div id="fileName" class="file-name"></div>
+                                    <div id="fileSize" class="file-size"></div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-secondary" onclick="clearFile()">Clear</button>
+                        </div>
+                        <button class="btn btn-primary" id="processBtn" onclick="processFile()" style="display:none;">Process File</button>
                     </div>
                 </div>
 
+                <!-- Message Input -->
                 <div class="input-area">
-                    <!-- Action Buttons -->
-                    <div class="input-actions">
-                        <button class="action-btn" data-tooltip="Upload PDF" onclick="togglePanel('uploadPanel')">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div class="input-wrapper">
+                        <button type="button" class="tool-btn" onclick="showUploadPanel()" title="Upload file">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                             </svg>
                         </button>
-                        <button class="action-btn" data-tooltip="Upload Image" onclick="document.getElementById('imageFileInput').click()">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                <circle cx="8.5" cy="8.5" r="1.5"/>
-                                <polyline points="21 15 16 10 5 21"/>
+                        <textarea id="messageInput" class="message-input" placeholder="Ask anything about your studies..." rows="1" oninput="autoResizeTextarea(this)"></textarea>
+                        <button type="button" class="send-btn" onclick="sendMessage()" title="Send message">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
                             </svg>
-                        </button>
-                        <input type="file" id="imageFileInput" class="file-input" accept=".jpg, .jpeg, .png, .gif, .bmp, .webp" onchange="handleImageUpload(event)" style="display: none;">
-                        <button class="action-btn" data-tooltip="View Summary" onclick="togglePanel('summaryPanel')" id="summaryBtn">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
-                            </svg>
-                            <span class="badge" id="summaryBadge" style="display: none;">1</span>
                         </button>
                     </div>
-
-                    <textarea class="message-input" id="messageInput" placeholder="Ask a question about your study material..." rows="1" oninput="autoResizeTextarea(this)"></textarea>
-                    
-                    <button class="send-btn" onclick="sendMessage()">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-                            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-                        </svg>
-                    </button>
+                    <div class="input-help">Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new line</div>
                 </div>
             </div>
-        </div>
+        </main>
     </div>
 
-    <script src="{% static 'js/chat.js' %}"></script>
+    <script src="{% static 'js/chat-new.js' %}"></script>
 </body>
 </html>

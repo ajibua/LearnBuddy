@@ -1,14 +1,21 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
+from django.contrib.auth.models import User
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
 from .models import StudyMaterial, ChatSession, ChatMessage
-from .ai_service import summarize_pdf, summarize_image, ask_buddy
+from .ai_service import summarize_pdf, summarize_image, summarize_document, ask_buddy
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.authtoken.models import Token
 import os
 import json
 import PyPDF2
@@ -21,16 +28,137 @@ def landing_view(request):
     }
     return render(request, 'landing.html', context)
 
+@login_required(login_url='login')
 def chat_view(request):
-    return render(request, 'chat.html')
+    """Render chat page with user context"""
+    context = {
+        'user': request.user,
+        'is_authenticated': request.user.is_authenticated
+    }
+    return render(request, 'chat.html', context)
+
+def login_view(request):
+    """Handle login page - GET to display form, POST to authenticate"""
+    if request.user.is_authenticated:
+        return redirect('chat')
+    
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        
+        # Try to authenticate with username first
+        user = authenticate(request, username=username, password=password)
+        
+        # If that fails, try with email as username
+        if not user:
+            try:
+                user_obj = User.objects.get(email=username)
+                user = authenticate(request, username=user_obj.username, password=password)
+            except User.DoesNotExist:
+                user = None
+        
+        if user is not None:
+            auth_login(request, user)
+            messages.success(request, f'Welcome back, {user.first_name or user.username}!')
+            return redirect('chat')
+        else:
+            messages.error(request, 'Invalid username/email or password.')
+    
+    return render(request, 'login.html')
+
+def signup_view(request):
+    """Handle signup page - GET to display form, POST to create user"""
+    if request.user.is_authenticated:
+        return redirect('chat')
+    
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        email = request.POST.get('email')
+        password = request.POST.get('password')
+        password_confirm = request.POST.get('password_confirm')
+        
+        # Validation
+        if not all([username, email, password, password_confirm]):
+            messages.error(request, 'Please fill in all fields.')
+        elif password != password_confirm:
+            messages.error(request, 'Passwords do not match.')
+        elif len(password) < 6:
+            messages.error(request, 'Password must be at least 6 characters long.')
+        elif User.objects.filter(username=username).exists():
+            messages.error(request, 'Username already exists.')
+        elif User.objects.filter(email=email).exists():
+            messages.error(request, 'Email already registered.')
+        else:
+            # Create user
+            user = User.objects.create_user(username=username, email=email, password=password)
+            auth_login(request, user)
+            messages.success(request, 'Account created successfully! Welcome to LearnBuddy.')
+            return redirect('chat')
+    
+    return render(request, 'signup.html')
+
+def logout_view(request):
+    """Handle logout"""
+    auth_logout(request)
+    messages.success(request, 'You have been logged out.')
+    return redirect('landing')
+
+# API Endpoints for token-based authentication (for mobile/external clients)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_api(request):
+    """API endpoint to register a user and get authentication token"""
+    username = request.data.get('username')
+    email = request.data.get('email')
+    password = request.data.get('password')
+
+    if not username or not password or not email:
+        return Response({'error': 'Please provide all fields'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(email=email).exists():
+        return Response({'error': 'Email already registered'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.create_user(username=username, email=email, password=password)
+    token, created = Token.objects.get_or_create(user=user)
+    
+    return Response({
+        'token': token.key,
+        'user_id': user.pk,
+        'username': user.username
+    }, status=status.HTTP_201_CREATED)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_api(request):
+    """API endpoint to login a user and get authentication token"""
+    username = request.data.get('username')
+    password = request.data.get('password')
+
+    user = authenticate(username=username, password=password)
+
+    if user:
+        token, created = Token.objects.get_or_create(user=user)
+        return Response({
+            'token': token.key,
+            'username': user.username
+        }, status=status.HTTP_200_OK)
+    
+    return Response({'error': 'Invalid Credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 @api_view(['GET'])
 def get_chat_history(request):
     """Fetch all chat sessions with their messages for the current user"""
     try:
-        # Get all chat sessions ordered by creation date (newest first)
-        sessions = ChatSession.objects.all().order_by('-created_at')
+        # Require authentication
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Not authenticated'}, status=401)
+        
+        # Get ONLY current user's chat sessions ordered by creation date (newest first)
+        sessions = ChatSession.objects.filter(user=request.user).order_by('-created_at')
         
         chat_data = []
         for session in sessions:
@@ -55,8 +183,27 @@ def get_chat_history(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-def chat_view(request):
-    return render(request, 'chat.html')
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_view(request):
+    username = request.data.get('username')
+    email = request.data.get('email')
+    password = request.data.get('password')
+
+    if not username or not password or not email:
+        return Response({'error': 'Please provide all fields'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.create_user(username=username, email=email, password=password)
+    token, created = Token.objects.get_or_create(user=user)
+    
+    return Response({
+        'token': token.key,
+        'user_id': user.pk,
+        'username': user.username
+    }, status=status.HTTP_201_CREATED)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class PDFUploadView(APIView):
@@ -217,13 +364,13 @@ class ImageUploadView(APIView):
 @api_view(['POST'])
 def chat_api(request):
     try:
-        # Parse JSON body
-        body = json.loads(request.body)
-        user_message = body.get('message', '').strip()
-        has_document = body.get('has_document', False)
-        document_name = body.get('document_name')
-        chat_history = body.get('chat_history', [])
-        session_id = body.get('session_id')  # Frontend will send this
+        # SECURITY: Require authentication
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Not authenticated'}, status=401)
+        
+        # Get data from request
+        user_message = request.data.get('message', '').strip()
+        session_id = request.data.get('session_id')
         
         if not user_message:
             return JsonResponse({'error': 'Message is required'}, status=400)
@@ -245,33 +392,19 @@ def chat_api(request):
         
         if session_id:
             try:
-                session = ChatSession.objects.get(id=session_id)
+                session = ChatSession.objects.get(id=session_id, user=request.user)
                 if session.study_material:
                     material = session.study_material
                     material_context = f"Document Context ({material.file.name}):\n{material.summary}"
             except ChatSession.DoesNotExist:
-                # Create new session if not found
-                session = ChatSession.objects.create()
+                # Create new session if not found (only for current user)
+                session = ChatSession.objects.create(user=request.user)
         else:
-            # Create new session
-            session = ChatSession.objects.create()
-        
-        # If document is uploaded, link it to session
-        if has_document and document_name and not session.study_material:
-            try:
-                material = StudyMaterial.objects.filter(
-                    file__icontains=document_name
-                ).order_by('-uploaded_at').first()
-                
-                if material:
-                    session.study_material = material
-                    session.save()
-                    material_context = f"Document Context ({document_name}):\n{material.summary}"
-            except:
-                pass
+            # Create new session associated with current user
+            session = ChatSession.objects.create(user=request.user)
         
         # Build system context for AI
-        system_context = """You are LearnBuddy, a friendly and helpful AI study assistant. Your personality:
+        system_context = """You are LearnBuddy, a friendly and helpful AI study assistant with EXPERT-LEVEL mathematics expertise. Your personality:
 
 1. CHRISTIAN TOPICS: You are VERY engaged, encouraging, and knowledgeable about Biblical topics. 
    - Provide Scripture references when relevant
@@ -285,11 +418,36 @@ def chat_api(request):
    - Ask clarifying questions to ensure understanding
    - Be patient and supportive
    
-3. MATHEMATICAL TOPICS: You help students understand mathematical concepts and topics.
-   - Analyse the problem and help user understand solutions line by line
-   - Use mathematical symbols and mathematical understandable and readable terms.
-   - Be supportive and encouraging no matter how complex the problem is.
-   - Be clear and precise in your explanation and don't bore user with your explanation, instead help user feel like a mathematics genius when with you.bb 
+3. MATHEMATICAL TOPICS: You are a MATHEMATICS GENIUS who helps students master math.
+   
+   CORE MATHEMATICS INSTRUCTIONS:
+   - Solve problems step-by-step with crystal clear explanations
+   - Use proper mathematical terminology (not LaTeX symbols)
+   - Never use raw symbols like $ or fractions like \frac{}{} - convert to readable formats
+   - Example: Instead of "x = \frac{12}{3}" write "x = 12 divided by 3 = 4"
+   - Example: Instead of "$x^2 + 5x + 6$" write "x squared plus 5x plus 6"
+   
+   FORMATTING FOR MATH:
+   - Use words for mathematical operations: "divided by", "times", "plus", "minus", "equals"
+   - Use "^" for exponents: "x^2 means x squared"
+   - Use "/" for fractions: "12/3 = 4" (read as "12 divided by 3 equals 4")
+   - Use special symbols when available: ≈ (approximately), ≠ (not equal), ≤ (less than or equal)
+   - Break equations into digestible parts with explanations between steps
+   
+   SOLVING PROBLEMS:
+   - Always show work step-by-step
+   - Label each step clearly: "Step 1:", "Step 2:", etc.
+   - Explain WHY you're doing each operation
+   - Highlight the final answer clearly
+   - Simplify to lowest terms and simplest form
+   - Show alternative methods when useful
+   
+   TONE FOR MATH:
+   - Make the student feel confident and capable
+   - Celebrate small victories in the problem
+   - Use encouraging language: "Great question!", "Let's break this down!", "You've got this!"
+   - Make complex math feel simple and achievable
+   - Help user feel like a mathematics genius when solving with you
    
 4. INAPPROPRIATE CONTENT: Politely redirect to educational topics
    - Stay professional and respectful
@@ -328,8 +486,8 @@ def chat_api(request):
                 # Fallback response if AI service fails
                 if is_christian_topic:
                     response_text = "That's a wonderful question about faith! While I'm having trouble accessing my full knowledge right now, I'd encourage you to explore the Scriptures directly. The Bible says in James 1:5, 'If any of you lacks wisdom, you should ask God, who gives generously to all without finding fault, and it will be given to you.' Could you rephrase your question, or would you like to discuss a specific Bible passage?"
-                elif has_document:
-                    response_text = f"I understand you're asking about the material in {document_name}. I'm having a brief technical issue, but I'm here to help! Could you please rephrase your question or be more specific about which section you'd like me to explain?"
+                elif material_context:
+                    response_text = "I understand you're asking about the material you uploaded. I'm having a brief technical issue, but I'm here to help! Could you please rephrase your question or be more specific about which section you'd like me to explain?"
                 else:
                     response_text = "I'm experiencing a brief technical difficulty. Please try rephrasing your question, or if you have study materials, upload them so I can provide more specific help!"
         
@@ -352,62 +510,105 @@ def chat_api(request):
             'timestamp': str(session.created_at)
         })
         
-    except json.JSONDecodeError:
-        return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JsonResponse({
             'error': 'An error occurred processing your message',
             'details': str(e)
         }, status=500)
 
 
-# Keep your original PDFUploadSummarizeView if needed elsewhere
-class PDFUploadSummarizeView(APIView):
+# Unified file upload and summarization endpoint
+@method_decorator(csrf_exempt, name='dispatch')
+class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
     
     def post(self, request, *args, **kwargs):
         try:
-            pdf_file = request.FILES.get('pdf')
+            # SECURITY: Require authentication
+            if not request.user.is_authenticated:
+                return Response({'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
             
-            if not pdf_file:
-                return Response({'error': 'No PDF file provided'}, 
+            uploaded_file = request.FILES.get('file')
+            
+            if not uploaded_file:
+                return Response({'error': 'No file provided'}, 
                               status=status.HTTP_400_BAD_REQUEST)
             
-            if not pdf_file.name.lower().endswith('.pdf'):
-                return Response({'error': 'File must be a PDF'}, 
-                              status=status.HTTP_400_BAD_REQUEST)
+            filename = uploaded_file.name.lower()
+            file_type = 'unknown'
+            summary = ""
             
-            # Handle both in-memory and temporary files
-            if hasattr(pdf_file, 'temporary_file_path'):
-                pdf_path = pdf_file.temporary_file_path()
+            # Determine file type
+            if filename.endswith('.pdf'):
+                file_type = 'pdf'
+            elif filename.endswith(('.jpg', '.jpeg')):
+                file_type = 'image'
+            elif filename.endswith('.png'):
+                file_type = 'image'
+            elif filename.endswith('.gif'):
+                file_type = 'image'
+            elif filename.endswith(('.doc', '.docx')):
+                file_type = 'document'
             else:
-                # For in-memory files, save temporarily
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                    for chunk in pdf_file.chunks():
-                        tmp.write(chunk)
-                    pdf_path = tmp.name
+                return Response({'error': 'File type not supported. Please use PDF, images (JPG, JPEG, PNG, GIF), or documents (DOC, DOCX)'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+            
+            # Save file temporarily and process
+            import tempfile
+            temp_path = None
             
             try:
-                summary = summarize_pdf(pdf_path)
+                # Create temp file
+                if file_type == 'pdf':
+                    suffix = '.pdf'
+                elif file_type == 'image':
+                    suffix = filename[filename.rfind('.'):]
+                elif file_type == 'document':
+                    suffix = filename[filename.rfind('.'):]
+                else:
+                    suffix = ''
                 
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    for chunk in uploaded_file.chunks():
+                        tmp.write(chunk)
+                    temp_path = tmp.name
+                
+                # Process based on file type
+                if file_type == 'pdf':
+                    summary = summarize_pdf(temp_path)
+                elif file_type == 'image':
+                    summary = summarize_image(temp_path)
+                else:  # document (Word documents)
+                    summary = summarize_document(temp_path)
+                
+                # Save to database (associate with current user)
                 study_material = StudyMaterial.objects.create(
-                    file=pdf_file,
-                    file_type='pdf',
+                    user=request.user,
+                    file=uploaded_file,
+                    file_type=file_type,
                     summary=summary
                 )
                 
                 return Response({
                     'id': study_material.id,
-                    'filename': pdf_file.name,
+                    'filename': uploaded_file.name,
+                    'file_type': file_type,
                     'summary': summary,
                     'uploaded_at': study_material.uploaded_at
                 }, status=status.HTTP_201_CREATED)
+                
             finally:
-                # Clean up temp file if we created one
-                if not hasattr(pdf_file, 'temporary_file_path'):
-                    os.unlink(pdf_path)
+                # Clean up temp file
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
             
         except Exception as e:
-            return Response({'error': f'Failed to process PDF: {str(e)}'}, 
+            import traceback
+            traceback.print_exc()
+            return Response({'error': f'Failed to process file: {str(e)}'}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)

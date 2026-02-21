@@ -83,7 +83,10 @@ function quickAction(action) {
         // Redirect to chat page for upload
         window.location.href = '/chat/';
     } else if (action === 'auth') {
-        // Redirect to login/signup (we'll create this later)
+        // Redirect to login page
         window.location.href = '/auth/login/';
+    } else if (action === 'logout') {
+        // Redirect to logout
+        window.location.href = '/auth/logout/';
     }
 }
