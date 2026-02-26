@@ -34,7 +34,7 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     '.railway.app',# Railway default domains
-    'https://learnbuddy-production.up.railway.app/',  # Your Railway app domain
+    'https://learnbuddy.up.railway.app/',  # Your Railway app domain
     'learnbuddy.com',  # Your custom domain
     'www.learnbuddy.com',  # With www subdomain
     os.getenv('RAILWAY_STATIC_URL', '').replace('http://', '').replace('https://', '').split('/')[0] if os.getenv('RAILWAY_STATIC_URL') else '',
