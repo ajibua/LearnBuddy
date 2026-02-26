@@ -26,12 +26,18 @@ except ImportError as e:
     def is_current_event_question(message):
         return False
 
-# Configure Tesseract path for Windows
-pytesseract.pytesseract.pytesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-poppler_path = r'C:\Users\HomePC\Downloads\poppler\poppler-25.12.0\Library\bin'
-
-if os.path.exists(poppler_path):
-    os.environ['PATH'] += os.pathsep + poppler_path
+# Configure Tesseract path for Windows (optional - only if available)
+# Tesseract is no longer required - Gemini vision API is the primary method
+try:
+    # Try to find tesseract on system PATH first
+    pytesseract.pytesseract.pytesseract_cmd = 'tesseract'
+except:
+    # If not in PATH, try the common Windows installation location
+    try:
+        pytesseract.pytesseract.pytesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    except:
+        # Tesseract is optional - Gemini vision will be used instead
+        print("Note: Tesseract not found. Gemini Vision API will be used for image/image-PDF processing.")
 
 # Initialize Google Generative AI with proper error handling
 google_api_key = getattr(settings, 'GOOGLE_API_KEY', None) or os.getenv('GOOGLE_API_KEY')
@@ -42,10 +48,10 @@ genai.configure(api_key=google_api_key)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 def extract_text_from_pdf(pdf_path):
-    """Extract text content from PDF file with fallback to OCR for image-based PDFs"""
+    """Extract text content from PDF file with fallback to Gemini vision for image-based PDFs"""
     text = ""
     try:
-        # First try normal PDF text extraction
+        # First try normal PDF text extraction (fast, for text-based PDFs)
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
             for page in pdf_reader.pages:
@@ -53,24 +59,134 @@ def extract_text_from_pdf(pdf_path):
                 if extracted:
                     text += extracted + "\n"
         
-        # If no text was extracted and tesseract is available, try OCR on PDF pages
-        if not text.strip() and is_tesseract_available():
-            try:
-                text = extract_text_from_pdf_with_ocr(pdf_path)
-            except:
-                pass  # If OCR fails, just keep the empty text
+        # If text extracted successfully, return it
+        if text.strip():
+            return text
+        
+        # If no text was extracted, it's likely an image-based PDF - use Gemini vision
+        print("Text-based extraction failed, attempting Gemini vision analysis on PDF pages...")
+        text = extract_text_from_pdf_with_gemini_vision(pdf_path)
             
     except Exception as e:
-        # If normal extraction fails, try OCR if available
-        if is_tesseract_available():
-            try:
-                text = extract_text_from_pdf_with_ocr(pdf_path)
-            except:
-                pass
-        if not text.strip():
-            raise Exception(f"Failed to extract PDF text: {str(e)}")
+        # If normal extraction fails, try Gemini vision
+        print(f"PyPDF2 extraction error, falling back to Gemini vision: {str(e)}")
+        try:
+            text = extract_text_from_pdf_with_gemini_vision(pdf_path)
+        except Exception as e2:
+            raise Exception(f"Failed to extract PDF text: {str(e2)}")
     
     return text if text.strip() else "Unable to extract text from this PDF."
+
+
+def extract_text_from_pdf_with_gemini_vision(pdf_path):
+    """
+    Extract text from image-based PDFs (including scanned / handwritten pages)
+    using Gemini's vision API.
+    Speed optimisations:
+    - 200 DPI (sharp enough for Gemini, ~44% smaller than 300 DPI)
+    - Images resized to max 1 600 px wide before encoding
+    - JPEG encoding (5-10× smaller than PNG)
+    - All pages processed IN PARALLEL via ThreadPoolExecutor
+    Quality:
+    - PIL contrast + sharpness enhancement before sending
+    - Gemini prompt explicitly ignores scanner watermarks (CamScanner, etc.)
+    """
+    import base64
+    from PIL import ImageEnhance
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    poppler_path = r'C:\Users\HomePC\Downloads\poppler\poppler-25.12.0\Library\bin'
+
+    try:
+        try:
+            if os.path.exists(poppler_path):
+                images = convert_from_path(
+                    pdf_path, first_page=1, last_page=20,
+                    dpi=200, poppler_path=poppler_path
+                )
+            else:
+                images = convert_from_path(pdf_path, first_page=1, last_page=20, dpi=200)
+        except Exception as e:
+            print(f"Poppler path failed, trying system poppler: {e}")
+            images = convert_from_path(pdf_path, first_page=1, last_page=20, dpi=200)
+
+    except Exception as e:
+        raise Exception(f"Failed to convert PDF pages to images: {str(e)}")
+
+    PAGE_PROMPT = (
+        "You are reading a scanned document page.\n"
+        "Your task: extract ONLY the actual document content — "
+        "handwritten notes, printed text, diagrams, tables, equations, "
+        "and any legible writing made by the document author.\n\n"
+        "IMPORTANT RULES:\n"
+        "1. IGNORE all scanner / app watermarks, logos, and branding. "
+        "This includes 'CamScanner', 'Adobe Scan', 'Microsoft Lens', "
+        "'Genius Scan', any app name, website URL, or promotional text "
+        "added by a scanning app — do NOT transcribe these.\n"
+        "2. If the page contains handwriting, transcribe it faithfully, "
+        "preserving line breaks, numbering, and structure.\n"
+        "3. If text is partially illegible, give your best reading and "
+        "mark uncertain words with [?].\n"
+        "4. Preserve the original layout: headings, bullet points, "
+        "numbered lists, tables, and paragraph breaks.\n"
+        "5. Return ONLY the transcribed text — no commentary or explanations."
+    )
+
+    def process_page(args):
+        """Preprocess one page image and call Gemini. Returns (idx, text)."""
+        idx, img = args
+        tmp_path = None
+        try:
+            # Preprocess
+            img = img.convert('RGB')
+            img = ImageEnhance.Contrast(img).enhance(1.8)
+            img = ImageEnhance.Sharpness(img).enhance(2.0)
+
+            # Resize to max 1600px wide to reduce payload size
+            max_width = 1600
+            if img.width > max_width:
+                ratio = max_width / img.width
+                img = img.resize(
+                    (max_width, int(img.height * ratio)),
+                    resample=Image.LANCZOS
+                )
+
+            # Save as JPEG (much smaller than PNG)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+                img.save(tmp, format='JPEG', quality=90, optimize=True)
+                tmp_path = tmp.name
+
+            with open(tmp_path, 'rb') as f:
+                img_data = base64.standard_b64encode(f.read()).decode('utf-8')
+
+            response = model.generate_content([
+                PAGE_PROMPT,
+                {"mime_type": "image/jpeg", "data": img_data}
+            ])
+
+            page_text = response.text.strip() if response.text else ""
+            return (idx, page_text)
+
+        except Exception as e:
+            print(f"Error processing page {idx + 1} with Gemini: {e}")
+            return (idx, "")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    # Process all pages IN PARALLEL (up to 5 concurrent Gemini calls)
+    results = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(process_page, (idx, img)): idx
+                   for idx, img in enumerate(images)}
+        for future in as_completed(futures):
+            idx, page_text = future.result()
+            if page_text:
+                results[idx] = page_text
+
+    # Reassemble in original page order
+    full_text = "\n\n".join(results[i] for i in sorted(results))
+    return full_text if full_text.strip() else "No readable text found in this PDF."
 
 
 def is_tesseract_available():
@@ -83,70 +199,65 @@ def is_tesseract_available():
 
 
 def extract_text_from_pdf_with_ocr(pdf_path):
-    """Extract text from PDF by converting pages to images and using OCR or Gemini vision"""
-    text = ""
-    try:
-        # Convert PDF pages to images with Poppler path
-        try:
-            images = convert_from_path(pdf_path, first_page=1, last_page=10, poppler_path=poppler_path if os.path.exists(poppler_path) else None)
-        except:
-            # Fallback: try without explicit poppler_path
-            images = convert_from_path(pdf_path, first_page=1, last_page=10)
-        
-        # Try tesseract OCR first if available
-        if is_tesseract_available():
-            for img in images:
-                img_text = pytesseract.image_to_string(img)
-                if img_text.strip():
-                    text += img_text + "\n"
-        else:
-            # Fallback: Use Gemini's vision API to analyze PDF images
-            for idx, img in enumerate(images):
-                try:
-                    # Save image to temporary file for Gemini API
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_img:
-                        img.save(tmp_img.name)
-                        
-                        # Upload to Gemini
-                        with open(tmp_img.name, 'rb') as f:
-                            img_data = f.read()
-                        
-                        # Use Gemini to extract text from image
-                        response = model.generate_content([
-                            f"Extract and transcribe ALL text from this PDF page image. Be precise and complete. Page {idx + 1}:",
-                            {
-                                "mime_type": "image/png",
-                                "data": img_data,
-                            }
-                        ])
-                        
-                        if response.text.strip():
-                            text += response.text + "\n"
-                        
-                        # Clean up
-                        os.unlink(tmp_img.name)
-                except Exception as e:
-                    print(f"Error processing page {idx + 1} with Gemini: {e}")
-                    continue
-        
-        return text if text.strip() else "No readable text found in this PDF."
-    except Exception as e:
-        raise Exception(f"Failed to extract text from PDF using OCR: {str(e)}")
+    """DEPRECATED: Use extract_text_from_pdf_with_gemini_vision instead"""
+    return extract_text_from_pdf_with_gemini_vision(pdf_path)
 
 
 def extract_text_from_image(image_path):
-    """Extract text from image using OCR (Optical Character Recognition)"""
+    """Extract text from image using Gemini's vision API (primary) or OCR fallback"""
     try:
-        if not is_tesseract_available():
-            return "📷 Image uploaded. Please ask me questions about it and I'll help analyze it!"
+        # Primary method: Use Gemini's vision API for reliable text extraction
+        with open(image_path, 'rb') as f:
+            import base64
+            img_data = base64.standard_b64encode(f.read()).decode("utf-8")
         
-        image = Image.open(image_path)
-        text = pytesseract.image_to_string(image)
-        if not text.strip():
+        # Determine image type
+        image_type = "image/jpeg"
+        if image_path.lower().endswith('.png'):
+            image_type = "image/png"
+        elif image_path.lower().endswith('.gif'):
+            image_type = "image/gif"
+        elif image_path.lower().endswith('.webp'):
+            image_type = "image/webp"
+        
+        response = model.generate_content([
+            (
+                "You are reading a scanned or photographed document/image.\n"
+                "Your task: extract ONLY the actual content created by the document author — "
+                "handwritten text, printed text, diagrams, tables, equations, labels, and captions.\n\n"
+                "IMPORTANT RULES:\n"
+                "1. IGNORE all scanner / app watermarks, logos, and branding. "
+                "This includes 'CamScanner', 'Adobe Scan', 'Microsoft Lens', "
+                "any app name, website URL, or promotional overlay added by a scanning app.\n"
+                "2. Transcribe handwriting faithfully, preserving the original line breaks and structure.\n"
+                "3. If text is partially illegible, give your best reading and mark uncertain words with [?].\n"
+                "4. If it contains a diagram or chart, describe its structure and all labelled values.\n"
+                "5. Return only the transcribed content — no commentary or explanations."
+            ),
+            {
+                "mime_type": image_type,
+                "data": img_data,
+            }
+        ])
+        
+        if response.text.strip():
+            return response.text
+        else:
             return "No readable text found in this image."
-        return text
+            
     except Exception as e:
-        return "📷 Image uploaded. Please ask me questions about it and I'll help analyze it!"
+        print(f"Gemini vision failed: {e}")
+        # Fallback to Tesseract if available
+        try:
+            if is_tesseract_available():
+                image = Image.open(image_path)
+                text = pytesseract.image_to_string(image)
+                if text.strip():
+                    return text
+        except Exception as ocr_error:
+            print(f"OCR fallback also failed: {ocr_error}")
+        
+        return "Unable to extract text from this image. Try asking questions about it and I'll help analyze it!"
 
 
 def extract_text_from_word(doc_path):
@@ -176,7 +287,7 @@ def extract_text_from_word(doc_path):
         return f"Failed to extract text from Word document: {str(e)}"
 
 
-def summarize_pdf(pdf_path):
+def summarize_pdf(pdf_path, user_instruction=None):
     """
     Summarize PDF content with structured formatting using Google Gemini
     """
@@ -187,7 +298,7 @@ def summarize_pdf(pdf_path):
             return "Unable to extract text from this PDF. The document may be image-based or encrypted."
         
         # Limit text length for API context window
-        pdf_text = pdf_text[:8000] 
+        pdf_text = pdf_text[:15000]
         
         prompt = f"""You are LearnBuddy. Analyze this material and provide a STYLED summary.
 
@@ -220,6 +331,9 @@ Please provide:
 If this contains religious content, highlight it warmly. Format in a friendly, helpful tone.
 In the course of summarizing documents, do not give the same response as the general response. Give a more clear, precise and concise explanation with more detailed explanation about the document's content."""
 
+        if user_instruction:
+            prompt += f"\n\n**User's specific request:** {user_instruction}\nMake sure to address this specific request directly in your response."
+
         response = model.generate_content(prompt)
         result = response.text
         print(f"Successfully summarized PDF using Google Gemini 2.5 Flash")
@@ -229,7 +343,7 @@ In the course of summarizing documents, do not give the same response as the gen
         return f"I processed the PDF, but encountered an issue generating a detailed summary. Error: {str(e)}"
 
 
-def summarize_image(image_path):
+def summarize_image(image_path, user_instruction=None):
     """
     Extract and analyze text from image with structured formatting using Google Gemini
     """
@@ -268,6 +382,9 @@ Please provide:
 
 Format in a friendly, helpful tone. Be clear and precise in your explanation."""
 
+        if user_instruction:
+            prompt += f"\n\n**User's specific request:** {user_instruction}\nMake sure to address this specific request directly in your response."
+
         response = model.generate_content(prompt)
         result = response.text
         print(f"Successfully analyzed image using Google Gemini 2.5 Flash")
@@ -277,7 +394,7 @@ Format in a friendly, helpful tone. Be clear and precise in your explanation."""
         return f"I processed the image, but encountered an issue generating a summary. Error: {str(e)}"
 
 
-def summarize_document(doc_path):
+def summarize_document(doc_path, user_instruction=None):
     """
     Extract and summarize text from Word documents (.docx) with structured formatting
     """
@@ -320,6 +437,9 @@ Please provide:
 
 Format in a friendly, helpful tone. Be clear and precise in your explanation."""
 
+        if user_instruction:
+            prompt += f"\n\n**User's specific request:** {user_instruction}\nMake sure to address this specific request directly in your response."
+
         response = model.generate_content(prompt)
         result = response.text
         print(f"Successfully summarized document using Google Gemini 2.5 Flash")
@@ -357,17 +477,19 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         current_event_info = ""
         if is_current_event_question(user_message):
             try:
+                # Try to get reference information (Wikipedia for general knowledge)
                 search_results = search_web(user_message, max_results=3)
-                if search_results and (search_results.get('news') or search_results.get('knowledge')):
+                if search_results and search_results.get('knowledge'):
                     current_event_info = format_search_results_for_ai(search_results)
+                    print(f"Found reference information for: {user_message}")
             except Exception as e:
-                # Silently fail - don't break the chat if search fails
-                print(f"Web search error: {e}")
+                # Don't break the chat if search fails - just continue without it
+                print(f"Web search error (non-blocking): {e}")
         
         # Build conversation context
         conversation_text = ""
         if conversation_history:
-            for msg in conversation_history[-4:]:  # Last 4 messages for context
+            for msg in conversation_history[-12:]:  # Last 12 messages for rich context
                 role = msg.get('role', 'user')
                 if 'parts' in msg:
                     content = msg['parts'][0] if msg['parts'] else ""
@@ -386,7 +508,7 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
                     role = 'User'
                 
                 if content:
-                    conversation_text += f"{role}: {str(content)[:500]}\n\n"
+                    conversation_text += f"{role}: {str(content)[:1000]}\n\n"
         
         # Build full prompt
         full_prompt = system_message + "\n\n"
@@ -395,7 +517,7 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
             full_prompt += "Previous conversation:\n" + conversation_text + "\n"
         
         if material_context:
-            full_prompt += f"STUDY MATERIAL CONTEXT:\n{material_context[:2000]}\n\n"
+            full_prompt += f"STUDY MATERIAL CONTEXT:\n{material_context[:4000]}\n\n"
         
         if current_event_info:
             full_prompt += current_event_info + "\n"

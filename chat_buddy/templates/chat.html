@@ -14,9 +14,6 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
-                    </svg>
                     <span>LearnBuddy</span>
                 </div>
             </div>
@@ -38,23 +35,31 @@
             </div>
 
             <div class="sidebar-footer">
-                <button class="profile-btn" onclick="showProfileMenu()">
-                    <div class="avatar">{{ user.first_name|first|default:"U" }}</div>
-                    <div class="user-info">
-                        <div class="username">{{ user.first_name|default:user.username }}</div>
-                        <div class="status-text">Online</div>
+                <div class="profile-section">
+                    <!-- Dropdown: appears above the profile button -->
+                    <div class="profile-dropdown" id="profileDropdown">
+                        <button class="dropdown-item theme-toggle-item" onclick="toggleTheme()">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="5"/>
+                                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                            </svg>
+                            <span id="themeLabel">Light Mode</span>
+                        </button>
+                        <a href="{% url 'logout' %}" class="dropdown-item logout-item">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1"/>
+                            </svg>
+                            <span>Sign Out</span>
+                        </a>
                     </div>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
-                    </svg>
-                </button>
-                <div class="profile-menu" id="profileMenu">
-                    <a href="{% url 'logout' %}" class="menu-item">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1"/>
+                    <!-- Profile button -->
+                    <button class="profile-btn" id="profileBtn" onclick="toggleProfileDropdown()">
+                        <div class="avatar" id="profileAvatar">{{ user.first_name|first|default:"U" }}</div>
+                        <span class="username" id="profileName">{{ user.first_name|default:user.username }}</span>
+                        <svg class="chevron-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 15l-6-6-6 6"/>
                         </svg>
-                        <span>Sign Out</span>
-                    </a>
+                    </button>
                 </div>
             </div>
         </aside>
@@ -141,7 +146,10 @@
                             </div>
                             <button type="button" class="btn btn-secondary" onclick="clearFile()">Clear</button>
                         </div>
-                        <button class="btn btn-primary" id="processBtn" onclick="processFile()" style="display:none;">Process File</button>
+                        <div id="fileMessageArea" style="display:none; margin-top:12px;">
+                            <textarea id="fileMessage" rows="2" placeholder="Add a message or question about this document (optional)..." style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border-color); background:var(--input-bg); color:var(--text-primary); resize:none; font-size:0.9rem; font-family:inherit; box-sizing:border-box;"></textarea>
+                        </div>
+                        <button class="btn btn-primary" id="processBtn" onclick="processFile()" style="display:none;">Send</button>
                     </div>
                 </div>
 

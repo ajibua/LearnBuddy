@@ -12,4 +12,5 @@ urlpatterns = [
     path('api/chat/', views.chat_api, name='chat-api'),
     path('api/upload/', views.FileUploadView.as_view(), name='upload-file'),
     path('api/chat-history/', views.get_chat_history, name='chat-history'),
+    path('api/current-user/', views.get_current_user, name='current-user'),
 ]

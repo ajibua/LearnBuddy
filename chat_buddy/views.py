@@ -150,6 +150,21 @@ def login_api(request):
 
 
 @api_view(['GET'])
+def get_current_user(request):
+    """API endpoint to get current logged-in user's information"""
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    
+    return JsonResponse({
+        'user_id': request.user.pk,
+        'username': request.user.username,
+        'first_name': request.user.first_name or request.user.username,
+        'email': request.user.email,
+        'is_authenticated': True
+    })
+
+
+@api_view(['GET'])
 def get_chat_history(request):
     """Fetch all chat sessions with their messages for the current user"""
     try:
@@ -460,7 +475,7 @@ def chat_api(request):
         else:
             # Build conversation history from database
             conversation_history = []
-            db_messages = session.messages.order_by('created_at')[:20]  # Last 20 messages
+            db_messages = session.messages.order_by('created_at')[:30]  # Last 30 messages
             
             for msg in db_messages:
                 conversation_history.append({
@@ -576,12 +591,13 @@ class FileUploadView(APIView):
                     temp_path = tmp.name
                 
                 # Process based on file type
+                user_message = request.data.get('user_message', '').strip()
                 if file_type == 'pdf':
-                    summary = summarize_pdf(temp_path)
+                    summary = summarize_pdf(temp_path, user_instruction=user_message)
                 elif file_type == 'image':
-                    summary = summarize_image(temp_path)
+                    summary = summarize_image(temp_path, user_instruction=user_message)
                 else:  # document (Word documents)
-                    summary = summarize_document(temp_path)
+                    summary = summarize_document(temp_path, user_instruction=user_message)
                 
                 # Save to database (associate with current user)
                 study_material = StudyMaterial.objects.create(
@@ -590,13 +606,51 @@ class FileUploadView(APIView):
                     file_type=file_type,
                     summary=summary
                 )
-                
+
+                # Link material to the current chat session so follow-up questions
+                # can reference it.  Accept an optional session_id from the frontend.
+                session_id = request.data.get('session_id')
+                session = None
+                if session_id:
+                    try:
+                        session = ChatSession.objects.get(id=session_id, user=request.user)
+                        session.study_material = study_material
+                        session.save()
+                    except (ChatSession.DoesNotExist, ValueError):
+                        session = None
+
+                # No active session yet - create one bound to this material
+                if not session:
+                    session = ChatSession.objects.create(
+                        user=request.user,
+                        study_material=study_material
+                    )
+
+                # Store the user's upload message so it appears in conversation history.
+                user_bubble = f"\ud83d\udcce {uploaded_file.name}"
+                if user_message:
+                    user_bubble += f"\n\n{user_message}"
+                ChatMessage.objects.create(
+                    session=session,
+                    role='user',
+                    content=user_bubble
+                )
+
+                # Store the upload event as an assistant message so it appears in
+                # conversation history for future turns.
+                ChatMessage.objects.create(
+                    session=session,
+                    role='assistant',
+                    content=f"[Uploaded file: {uploaded_file.name}]\n\nSummary:\n{summary}"
+                )
+
                 return Response({
                     'id': study_material.id,
                     'filename': uploaded_file.name,
                     'file_type': file_type,
                     'summary': summary,
-                    'uploaded_at': study_material.uploaded_at
+                    'uploaded_at': study_material.uploaded_at,
+                    'session_id': session.id,
                 }, status=status.HTTP_201_CREATED)
                 
             finally:

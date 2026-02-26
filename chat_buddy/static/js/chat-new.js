@@ -6,7 +6,9 @@ let isLoading = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    loadTheme();                // restore dark/light preference
     initializeEventListeners();
+    updateUserProfile();        // fetch and update current user profile
     loadChatHistory();
     checkInitialMessage();
 });
@@ -77,6 +79,36 @@ function initializeEventListeners() {
     });
 }
 
+async function updateUserProfile() {
+    try {
+        const response = await fetch('/api/current-user/', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') }
+        });
+
+        if (response.ok) {
+            const userData = await response.json();
+            const firstName = userData.first_name || userData.username || 'User';
+            const firstLetter = firstName.charAt(0).toUpperCase();
+
+            // Update sidebar avatar + name
+            const profileAvatar = document.getElementById('profileAvatar');
+            if (profileAvatar) profileAvatar.textContent = firstLetter;
+
+            const profileName = document.getElementById('profileName');
+            if (profileName) profileName.textContent = firstName;
+
+            // Update welcome heading if visible
+            const welcomeHeading = document.querySelector('.welcome-section h2');
+            if (welcomeHeading) welcomeHeading.textContent = `Hey there, ${firstName}! 👋`;
+
+        } else if (response.status === 401) {
+            window.location.href = '/auth/login/';
+        }
+    } catch (error) {
+        console.error('Error updating user profile:', error);
+    }
+}
 function autoResizeTextarea(textarea) {
     textarea.style.height = 'auto';
     textarea.style.height = Math.min(textarea.scrollHeight, 80) + 'px';
@@ -115,6 +147,7 @@ function handleFileUpload(e) {
     document.getElementById('fileName').textContent = file.name;
     document.getElementById('fileSize').textContent = `${fileSize} MB`;
     document.getElementById('fileInfo').style.display = 'flex';
+    document.getElementById('fileMessageArea').style.display = 'block';
     document.getElementById('processBtn').style.display = 'block';
 }
 
@@ -122,14 +155,36 @@ function clearFile() {
     currentFile = null;
     document.getElementById('fileInput').value = '';
     document.getElementById('fileInfo').style.display = 'none';
+    document.getElementById('fileMessageArea').style.display = 'none';
+    document.getElementById('fileMessage').value = '';
     document.getElementById('processBtn').style.display = 'none';
 }
 
 async function processFile() {
     if (!currentFile) return;
-    
+
+    const userMessage = (document.getElementById('fileMessage')?.value || '').trim();
+
     const formData = new FormData();
     formData.append('file', currentFile);
+    // Pass the current session ID so the file gets linked to this conversation
+    if (currentSessionId) {
+        formData.append('session_id', currentSessionId);
+    }
+    if (userMessage) {
+        formData.append('user_message', userMessage);
+    }
+
+    // Show user bubble immediately — file + optional message
+    const welcomeSection = document.querySelector('.welcome-section');
+    if (welcomeSection) welcomeSection.remove();
+    const bubbleContent = userMessage
+        ? `📎 **${currentFile.name}**\n\n${userMessage}`
+        : `📎 **${currentFile.name}**`;
+    addMessage('user', bubbleContent);
+
+    closeUploadPanel();
+    clearFile();
 
     try {
         showLoadingIndicator();
@@ -146,16 +201,13 @@ async function processFile() {
         const data = await response.json();
         
         if (response.ok) {
-            // Remove welcome section if present
-            const welcomeSection = document.querySelector('.welcome-section');
-            if (welcomeSection) {
-                welcomeSection.remove();
+            // Persist the session_id returned after linking the material
+            if (data.session_id) {
+                currentSessionId = data.session_id;
             }
             
             // Add assistant message with summary
             addMessage('assistant', `✅ **${data.filename}** uploaded successfully!\n\n**📝 Summary:**\n\n${data.summary}\n\nFeel free to ask me any questions about this material!`);
-            closeUploadPanel();
-            clearFile();
             updateChatTitle(data.filename, data.filename);
         } else {
             addMessage('assistant', `❌ Error: ${data.error}`);
@@ -184,11 +236,6 @@ async function sendMessage() {
     input.value = '';
     input.style.height = 'auto';
 
-    // Create session if needed
-    if (!currentSessionId) {
-        currentSessionId = Date.now(); // Simple session ID
-    }
-
     // Show loading indicator
     isLoading = true;
     showLoadingIndicator();
@@ -211,6 +258,10 @@ async function sendMessage() {
         if (response.ok) {
             const data = await response.json();
             addMessage('assistant', data.response);
+            // CRITICAL: persist the real DB session_id for conversation continuity
+            if (data.session_id) {
+                currentSessionId = data.session_id;
+            }
             updateChatTitle(message);
         } else {
             addMessage('assistant', 'Sorry, I encountered an error. Please try again.');
@@ -456,15 +507,51 @@ function updateChatTitle(context, material = null) {
 
 function startNewChat() {
     currentSessionId = null;
+
+    // Clear message list
     document.getElementById('messagesList').innerHTML = '';
-    
-    const welcomeSection = document.createElement('div');
-    welcomeSection.className = 'welcome-section';
-    
-    
-    document.getElementById('messagesList').appendChild(welcomeSection);
+
+    // Rebuild welcome section inside messagesContainer (not messagesList)
+    const container = document.getElementById('messagesContainer');
+    const existing = container.querySelector('.welcome-section');
+    if (existing) existing.remove();
+
+    const welcomeDiv = document.createElement('div');
+    welcomeDiv.className = 'welcome-section';
+    welcomeDiv.innerHTML = `
+        <div class="welcome-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+            </svg>
+        </div>
+        <h2>Hey there! 👋</h2>
+        <p>I'm your personal AI study assistant. Upload your study materials to get started.</p>
+        <div class="quick-actions">
+            <button type="button" class="action-card" onclick="showUploadPanel()">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2v20M2 12h20"/>
+                </svg>
+                <div><h3>Upload Material</h3><p>PDF, images, and more</p></div>
+            </button>
+            <button type="button" class="action-card" onclick="document.getElementById('messageInput').focus()">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                <div><h3>Ask a Question</h3><p>Get instant help</p></div>
+            </button>
+        </div>`;
+
+    // Insert before messagesList so DOM order is correct
+    container.insertBefore(welcomeDiv, document.getElementById('messagesList'));
+
+    // Refresh the greeting with logged-in user name
+    updateUserProfile();
+
     document.getElementById('chatTitle').textContent = 'Welcome to LearnBuddy';
     document.getElementById('chatSubtitle').textContent = 'Upload materials and start learning';
+
+    // Close sidebar after starting a new chat
+    document.querySelector('.sidebar').classList.remove('open');
 }
 
 function loadChatHistory() {
@@ -546,18 +633,48 @@ function checkInitialMessage() {
 }
 
 function toggleSidebar() {
-    document.querySelector('.sidebar').classList.toggle('closed');
+    document.querySelector('.sidebar').classList.toggle('open');
 }
 
-function showProfileMenu() {
-    const menu = document.getElementById('profileMenu');
-    menu.classList.toggle('active');
+function toggleProfileDropdown() {
+    const dropdown = document.getElementById('profileDropdown');
+    const btn = document.getElementById('profileBtn');
+    const isActive = dropdown.classList.toggle('active');
+    btn.classList.toggle('dropdown-open', isActive);
 }
 
-// Close profile menu when clicking outside
+function toggleTheme() {
+    const isLight = document.body.classList.toggle('light-mode');
+    localStorage.setItem('learnbuddy-theme', isLight ? 'light' : 'dark');
+    const label = document.getElementById('themeLabel');
+    if (label) label.textContent = isLight ? 'Dark Mode' : 'Light Mode';
+}
+
+function loadTheme() {
+    const saved = localStorage.getItem('learnbuddy-theme');
+    if (saved === 'light') {
+        document.body.classList.add('light-mode');
+        const label = document.getElementById('themeLabel');
+        if (label) label.textContent = 'Dark Mode';
+    }
+}
+
+// Close profile dropdown and sidebar when clicking outside
 document.addEventListener('click', (e) => {
-    if (!e.target.closest('.profile-btn')) {
-        document.getElementById('profileMenu').classList.remove('active');
+    const profileSection = document.querySelector('.profile-section');
+    if (profileSection && !profileSection.contains(e.target)) {
+        const dropdown = document.getElementById('profileDropdown');
+        const btn = document.getElementById('profileBtn');
+        if (dropdown) dropdown.classList.remove('active');
+        if (btn) btn.classList.remove('dropdown-open');
+    }
+
+    // Close sidebar when clicking in the main area (not the toggle or the sidebar itself)
+    const sidebar = document.querySelector('.sidebar');
+    const toggle = document.querySelector('.menu-toggle');
+    if (sidebar && sidebar.classList.contains('open') &&
+        !sidebar.contains(e.target) && !toggle?.contains(e.target)) {
+        sidebar.classList.remove('open');
     }
 });
 
