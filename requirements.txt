@@ -26,3 +26,4 @@ whitenoise==6.6.0
 
 # Database (SQLite built-in, add these for PostgreSQL if needed later)
 psycopg2-binary==2.9.9
+dj-database-url==2.1.0
