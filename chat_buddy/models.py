@@ -19,6 +19,7 @@ class StudyMaterial(models.Model):
 class ChatSession(models.Model):
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='chat_sessions', null=True, blank=True)
     study_material = models.ForeignKey(StudyMaterial, on_delete=models.CASCADE, related_name='chat_sessions', null=True, blank=True)
+    title = models.CharField(max_length=120, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -30,9 +31,12 @@ class ChatSession(models.Model):
 
 
 class ChatMessage(models.Model):
+    FEEDBACK_CHOICES = [('up', 'up'), ('down', 'down')]
+
     session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name='messages', null=True, blank=True)
-    role = models.CharField(max_length=10)  # 'user' or 'model'
+    role = models.CharField(max_length=10)  # 'user' or 'assistant'
     content = models.TextField()
+    feedback = models.CharField(max_length=4, choices=FEEDBACK_CHOICES, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:

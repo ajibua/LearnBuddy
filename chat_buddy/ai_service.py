@@ -7,6 +7,7 @@ from pdf2image import convert_from_path
 from docx import Document
 import tempfile
 import os
+import re
 
 # Try to import web search functionality, but don't fail if it's not available
 try:
@@ -47,6 +48,100 @@ if not google_api_key:
 genai.configure(api_key=google_api_key)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
+# ---------------------------------------------------------------------------
+# SymPy math engine
+# ---------------------------------------------------------------------------
+try:
+    import sympy as sp
+    SYMPY_AVAILABLE = True
+except ImportError:
+    SYMPY_AVAILABLE = False
+    print("Warning: SymPy not installed. pip install sympy to enable verified math solving.")
+
+_MATH_KEYWORDS = {
+    'solve', 'calculate', 'compute', 'evaluate', 'simplify', 'differentiate',
+    'integrate', 'derivative', 'integral', 'limit', 'expand', 'factor',
+    'prove', 'determinant', 'eigenvalue', 'eigenvalues', 'matrix',
+    'series', 'taylor', 'fourier', 'laplace', 'equation', 'polynomial',
+    'roots', 'zeros', 'gradient', 'divergence', 'curl',
+}
+
+def is_math_computation_problem(message: str) -> bool:
+    """Return True when the message is likely a math computation request."""
+    lower = message.lower()
+    if any(kw in lower for kw in _MATH_KEYWORDS):
+        return True
+    # Contains common math expressions
+    if re.search(r'[\^=√∫∑∏]|d/dx|\bx\b.*=|\bf\(x\)', lower):
+        return True
+    return False
+
+
+def solve_with_sympy(problem_description: str):
+    """
+    Ask Gemini to generate SymPy code for a math problem, execute it safely,
+    and return (plain_result, latex_result).  Returns (None, None) on failure.
+    """
+    if not SYMPY_AVAILABLE:
+        return None, None
+    try:
+        code_prompt = (
+            "Write self-contained Python code using SymPy to solve the following math problem.\n"
+            "Rules:\n"
+            "- Import sympy at the top.\n"
+            "- Store the final answer in a variable called `result`.\n"
+            "- Store the LaTeX string of the answer in `result_latex` using sp.latex().\n"
+            "- Output ONLY the raw Python code — no markdown fences, no prose.\n\n"
+            f"Problem: {problem_description}"
+        )
+        code_response = model.generate_content(code_prompt)
+        code = code_response.text.strip()
+        # Strip markdown code fences if Gemini wrapped the code anyway
+        code = re.sub(r'^```(?:python)?\s*', '', code, flags=re.MULTILINE)
+        code = re.sub(r'```\s*$', '', code, flags=re.MULTILINE)
+        code = code.strip()
+
+        # Execute in an isolated namespace (sympy is the only extra import allowed)
+        namespace = {'__builtins__': {
+            'print': print, 'range': range, 'len': len, 'list': list,
+            'dict': dict, 'set': set, 'tuple': tuple, 'int': int,
+            'float': float, 'str': str, 'bool': bool, 'abs': abs,
+            'round': round, 'enumerate': enumerate, 'zip': zip,
+            '__import__': __import__,
+        }}
+        exec(code, namespace)
+
+        result = namespace.get('result')
+        result_latex = namespace.get('result_latex', '')
+        if result is None:
+            return None, None
+        if not result_latex:
+            result_latex = sp.latex(result)
+        return str(result), str(result_latex)
+    except Exception as exc:
+        print(f"SymPy solver error (non-blocking): {exc}")
+        return None, None
+
+_SCANNER_WATERMARKS = [
+    'camscanner', 'adobe scan', 'microsoft lens', 'genius scan',
+    'tiny scanner', 'turbo scan', 'scanbot', 'docscanner',
+    'scan with', 'scanned by', 'scanned with',
+]
+
+def _is_meaningful_text(text: str, min_chars: int = 120) -> bool:
+    """
+    Return True only if the extracted text contains substantial real content
+    after removing known scanner watermark noise.
+    """
+    cleaned = text.lower()
+    for watermark in _SCANNER_WATERMARKS:
+        cleaned = cleaned.replace(watermark, '')
+    # Strip whitespace, punctuation and digits that were part of watermarks
+    import re
+    cleaned = re.sub(r'[\s\W\d]+', ' ', cleaned).strip()
+    return len(cleaned) >= min_chars
+
+
 def extract_text_from_pdf(pdf_path):
     """Extract text content from PDF file with fallback to Gemini vision for image-based PDFs"""
     text = ""
@@ -58,15 +153,16 @@ def extract_text_from_pdf(pdf_path):
                 extracted = page.extract_text()
                 if extracted:
                     text += extracted + "\n"
-        
-        # If text extracted successfully, return it
-        if text.strip():
+
+        # Only accept the PyPDF2 result if it contains meaningful content
+        # (not just scanner watermarks like "CamScanner" repeated across pages)
+        if text.strip() and _is_meaningful_text(text):
             return text
-        
-        # If no text was extracted, it's likely an image-based PDF - use Gemini vision
-        print("Text-based extraction failed, attempting Gemini vision analysis on PDF pages...")
+
+        # Either no text, or only watermark noise — use Gemini Vision
+        print("Text-based extraction yielded no meaningful content, falling back to Gemini Vision...")
         text = extract_text_from_pdf_with_gemini_vision(pdf_path)
-            
+
     except Exception as e:
         # If normal extraction fails, try Gemini vision
         print(f"PyPDF2 extraction error, falling back to Gemini vision: {str(e)}")
@@ -74,7 +170,7 @@ def extract_text_from_pdf(pdf_path):
             text = extract_text_from_pdf_with_gemini_vision(pdf_path)
         except Exception as e2:
             raise Exception(f"Failed to extract PDF text: {str(e2)}")
-    
+
     return text if text.strip() else "Unable to extract text from this PDF."
 
 
@@ -447,28 +543,51 @@ Format in a friendly, helpful tone. Be clear and precise in your explanation."""
         
     except Exception as e:
         return f"I processed the document, but encountered an issue generating a summary. Error: {str(e)}"
+
+
+def generate_session_title(user_message: str, assistant_response: str) -> str:
+    """
+    Generate a concise 4-6 word title that captures what the conversation is about.
+    Called once after the first exchange so the title reflects the actual topic.
+    """
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        prompt = (
+            "Based on this conversation exchange, write a short chat title of 4 to 6 words max. "
+            "The title should capture the main topic clearly. "
+            "Do NOT use quotes, punctuation, or any prefix like 'Title:'. Just the plain words.\n\n"
+            f"User: {user_message[:300]}\n"
+            f"Assistant: {assistant_response[:300]}"
+        )
+        response = model.generate_content(prompt)
+        title = response.text.strip().strip('"\'')
+        # Trim to 80 chars just in case
+        return title[:80] if title else ''
+    except Exception:
+        return ''
+
+
 def ask_buddy(user_message, conversation_history=None, material_context=None, 
-              system_context=None, is_christian_topic=False, file=None):
+              system_context=None, is_religion_topic=False, file=None):
     """
     Get AI response with improved layout using Google Gemini
     Includes real-time web search for current events/news questions
     """
     try:
         system_message = """You are LearnBuddy. Your personality:
-1. CHRISTIAN TOPICS: Use Scripture references and be warm and encouraging (not necessarily emojis).
+1. RELIGIOUS TOPICS: Give clear and logical answers to whatever religious question. either christian, islamic, or whatever religion even down to atheism and buddhism and the rest.
 2. EDUCATIONAL CONTENT: Break down complex topics using bullet points and headers.
 3. GENERAL TONE: Friendly and organized. Always use double line breaks between ideas.
-4. MATHEMATICS GENIUS: For mathematical content:
-   - ALWAYS use Unicode superscript/subscript characters directly in your output:
-     * Superscripts: Use ⁰¹²³⁴⁵⁶⁷⁸⁹ instead of writing ^2, ^3, etc.
-     * Subscripts: Use ₀₁₂₃₄₅₆₇₈₉ instead of writing _1, _2, etc.
-     * Examples: x² instead of x^2, a₁ instead of a_1, E=mc² instead of E=mc^2
-   - Use proper mathematical symbols: × or · for multiplication, ÷ for division
-   - Never spell out mathematical operations (not "x times y", not "x squared")
-   - Use mathematical symbols for operators (not words)
-   - For Greek letters use: π, α, β, γ, δ, ε, ζ, η, θ, λ, μ, ν, ξ, ρ, σ, τ, φ, χ, ψ, ω
-   - Break down complex problems with clear steps
-   - Keep output clean and readable with proper mathematical formatting"""
+4. MATHEMATICS: For ALL mathematical content you MUST:
+   - Use LaTeX notation exclusively — never write math in plain words.
+   - Inline expressions: wrap with $...$ (e.g., $x^2 + y^2 = z^2$).
+   - Display / block equations: wrap with $$...$$ on its own line.
+   - Use full LaTeX syntax: \\frac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{n=0}^{\\infty}, \\sqrt{x}, \\lim_{x \\to 0}, etc.
+   - Greek letters via LaTeX: \\alpha, \\beta, \\pi, \\theta, \\Delta, \\Sigma, etc.
+   - NEVER write "integral from a to b" — write $$\\int_a^b f(x)\\,dx$$ instead.
+   - NEVER use Unicode superscripts (², ³) — use $x^2$, $x^3$.
+   - Show step-by-step solutions with each step wrapped in LaTeX.
+   - If a SYMPY VERIFIED RESULT is provided below, use that exact answer."""
 
         if system_context:
             system_message = system_context
@@ -485,6 +604,18 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
             except Exception as e:
                 # Don't break the chat if search fails - just continue without it
                 print(f"Web search error (non-blocking): {e}")
+
+        # Attempt SymPy-verified computation for maths questions
+        sympy_context = ""
+        if is_math_computation_problem(user_message):
+            sympy_plain, sympy_latex = solve_with_sympy(user_message)
+            if sympy_plain:
+                sympy_context = (
+                    f"SYMPY VERIFIED RESULT (computed symbolically — use this exact answer):\n"
+                    f"  Plain:  {sympy_plain}\n"
+                    f"  LaTeX:  ${sympy_latex}$\n"
+                )
+                print(f"SymPy result for '{user_message[:60]}': {sympy_plain}")
         
         # Build conversation context
         conversation_text = ""
@@ -521,9 +652,12 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         
         if current_event_info:
             full_prompt += current_event_info + "\n"
-        
-        if is_christian_topic:
-            full_prompt += "The user is asking about Christian/Biblical topics. Respond with warmth and Scripture references using clear headers.\n\n"
+
+        if sympy_context:
+            full_prompt += sympy_context + "\n"
+
+        if is_religion_topic:
+            full_prompt += "The user is asking about religious topics. Respond with warmth, scriptural and logical references using clear headers.\n\n"
         
         full_prompt += f"User: {user_message}\nAssistant:"
         
@@ -532,6 +666,6 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         return result
         
     except Exception as e:
-        if is_christian_topic:
+        if is_religion_topic:
             return "I'm experiencing a technical issue. Please share a specific verse you'd like to discuss, or feel free to rephrase your question."
         return f"I'm here to help, but I encountered a technical issue. (Error: {str(e)})"

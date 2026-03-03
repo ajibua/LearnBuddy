@@ -7,6 +7,9 @@ django-cors-headers==4.3.1
 google-generativeai==0.3.0
 python-dotenv==1.0.0
 
+# Mathematics
+sympy==1.13.3
+
 # Document Processing
 PyPDF2==3.0.1
 pytesseract==0.3.10

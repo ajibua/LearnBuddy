@@ -6,13 +6,13 @@
 }
 
 body {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    color: #e2e8f0;
+    color: #1e293b;
 }
 
 .landing-container {
@@ -51,7 +51,7 @@ body {
 
 .subtitle {
     font-size: 1.1rem;
-    color: #94a3b8;
+    color: #64748b;
     font-weight: 500;
 }
 
@@ -65,11 +65,12 @@ body {
     display: flex;
     gap: 0.75rem;
     align-items: flex-end;
-    background: #0f172a;
-    border: 1px solid #334155;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
     border-radius: 1.5rem;
     padding: 1.5rem;
     backdrop-filter: blur(10px);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
     transition: all 0.3s ease;
 }
 
@@ -82,7 +83,7 @@ body {
     flex: 1;
     background: transparent;
     border: none;
-    color: #e2e8f0;
+    color: #1e293b;
     font-size: 1rem;
     outline: none;
     padding: 0.5rem;
@@ -93,7 +94,7 @@ body {
 }
 
 .landing-textarea::placeholder {
-    color: #64748b;
+    color: #94a3b8;
 }
 
 .send-btn {
@@ -133,15 +134,15 @@ body {
     align-items: center;
     gap: 0.5rem;
     padding: 0.75rem 1.5rem;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid #334155;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
     border-radius: 0.75rem;
-    color: #60a5fa;
+    color: #2563eb;
     cursor: pointer;
     font-size: 0.95rem;
     font-weight: 500;
     transition: all 0.3s ease;
-    backdrop-filter: blur(10px);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
 .quick-btn:hover {

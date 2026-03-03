@@ -219,11 +219,52 @@ _MUSIC_TERMS = {
 _NEWS_TERMS = {
     'news', 'breaking', 'latest', 'today', 'now', 'current', 'happening',
     'update', 'crisis', 'election', 'war', 'protest', 'parliament',
-    'president', 'government', 'policy', 'inflation', 'economy',
+    'president', 'government', 'policy', 'inflation', 'economy', 'politics', 'sports'
 }
 _BOOK_TERMS = {
     'book', 'novel', 'author', 'wrote', 'written by', 'published',
     'literature', 'poetry', 'poem', 'bibliography', 'read', 'chapter',
+}
+_SPORTS_TERMS = {
+    # General
+    'sport', 'sports', 'athlete', 'player', 'team', 'coach', 'manager',
+    'fixture', 'match', 'game', 'season', 'league', 'tournament', 'cup',
+    'championship', 'final', 'semifinal', 'quarterfinal', 'playoff',
+    'standings', 'table', 'ranking', 'transfer', 'roster', 'squad',
+    'score', 'result', 'scoreline', 'highlight', 'hat-trick', 'record',
+    'injury', 'suspension', 'contract', 'draft', 'trade',
+    # Football / Soccer
+    'football', 'soccer', 'premier league', 'la liga', 'bundesliga',
+    'serie a', 'ligue 1', 'champions league', 'europa league',
+    'world cup', 'euros', 'afcon', 'copa america', 'mls',
+    'goal', 'penalty', 'offside', 'red card', 'yellow card', 'dribble',
+    'striker', 'midfielder', 'defender', 'goalkeeper', 'winger',
+    # Basketball
+    'basketball', 'nba', 'ncaa', 'fiba', 'three-pointer', 'dunk',
+    'rebound', 'assist', 'point guard', 'shooting guard', 'small forward',
+    'power forward', 'center',
+    # American Football
+    'nfl', 'super bowl', 'touchdown', 'quarterback', 'receiver',
+    'running back', 'linebacker', 'cornerback',
+    # Cricket
+    'cricket', 'ipl', 'test match', 'odi', 't20', 'wicket', 'batting',
+    'bowling', 'century', 'innings', 'over',
+    # Tennis
+    'tennis', 'wimbledon', 'us open', 'french open', 'australian open',
+    'grand slam', 'atp', 'wta', 'serve', 'ace', 'deuce', 'set',
+    # Athletics / Olympics
+    'olympics', 'athletics', 'sprint', 'marathon', 'relay', 'javelin',
+    'swimming', 'gymnastics', 'medal', 'podium',
+    # Boxing / MMA
+    'boxing', 'mma', 'ufc', 'knockout', 'heavyweight', 'welterweight',
+    # Rugby
+    'rugby', 'try', 'scrum', 'lineout',
+    # Baseball
+    'baseball', 'mlb', 'home run', 'pitcher', 'batter',
+    # Golf
+    'golf', 'pga', 'birdie', 'eagle', 'par', 'bogey',
+    # F1 / Motorsport
+    'formula 1', 'f1', 'grand prix', 'motorsport', 'nascar', 'pole position',
 }
 
 def _query_is_music(q):
@@ -238,6 +279,9 @@ def _query_is_book(q):
     q = q.lower()
     return any(t in q for t in _BOOK_TERMS)
 
+def _query_is_sports(q):
+    q = q.lower()
+    return any(t in q for t in _SPORTS_TERMS)
 
 # ---------------------------------------------------------------------------
 # MusicBrainz  – free, no API key required, great for artists/albums
@@ -313,6 +357,75 @@ def search_musicbrainz(query):
 
     except Exception as e:
         print(f"MusicBrainz search error: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# TheSportsDB  – free sports data (teams, players, events)
+# ---------------------------------------------------------------------------
+
+def search_thesportsdb(query):
+    """
+    Search TheSportsDB free tier for sports teams, players, and events.
+    No API key required for the free tier.
+    Returns a dict with the best match found across all entity types.
+    """
+    try:
+        cached = get_cached_search(f"sdb:{query}")
+        if cached:
+            return cached
+
+        headers = {'User-Agent': 'LearnBuddy/1.0 (Educational AI Assistant)'}
+        base = "https://www.thesportsdb.com/api/v1/json/3"
+        result = {}
+
+        # Try player search first
+        r = requests.get(f"{base}/searchplayers.php",
+                         params={'p': query}, headers=headers, timeout=8)
+        if r.ok:
+            players = (r.json() or {}).get('player') or []
+            if players:
+                p = players[0]
+                result = {
+                    'type': 'player',
+                    'name': p.get('strPlayer'),
+                    'nationality': p.get('strNationality'),
+                    'position': p.get('strPosition'),
+                    'team': p.get('strTeam'),
+                    'sport': p.get('strSport'),
+                    'born': p.get('dateBorn'),
+                    'description': (p.get('strDescriptionEN') or '')[:500],
+                    'status': p.get('strStatus'),
+                    'height': p.get('strHeight'),
+                    'weight': p.get('strWeight'),
+                }
+
+        # If no player, try team search
+        if not result:
+            r = requests.get(f"{base}/searchteams.php",
+                             params={'t': query}, headers=headers, timeout=8)
+            if r.ok:
+                teams = (r.json() or {}).get('teams') or []
+                if teams:
+                    t = teams[0]
+                    result = {
+                        'type': 'team',
+                        'name': t.get('strTeam'),
+                        'sport': t.get('strSport'),
+                        'league': t.get('strLeague'),
+                        'country': t.get('strCountry'),
+                        'formed': t.get('intFormedYear'),
+                        'stadium': t.get('strStadium'),
+                        'description': (t.get('strDescriptionEN') or '')[:500],
+                        'website': t.get('strWebsite'),
+                    }
+
+        if result:
+            cache_search_results(f"sdb:{query}", result)
+        return result or None
+
+    except Exception as e:
+        print(f"TheSportsDB search error: {e}")
         return None
 
 
@@ -615,14 +728,16 @@ def search_web(query, max_results=3):
             'musicbrainz': None,
             'wikidata': None,
             'news': None,
+            'sports': None,
             'reddit': None,
             'books': None,
             'timestamp': datetime.now().isoformat(),
         }
 
-        is_music = _query_is_music(query)
-        is_news  = _query_is_news(query)
-        is_book  = _query_is_book(query)
+        is_music  = _query_is_music(query)
+        is_news   = _query_is_news(query)
+        is_book   = _query_is_book(query)
+        is_sports = _query_is_sports(query)
 
         # 1 – Wikipedia (always)
         wiki_result = search_wikipedia(query)
@@ -648,11 +763,17 @@ def search_web(query, max_results=3):
         if wd:
             results['wikidata'] = wd
 
-        # 5 – Google News (news / current-events queries)
-        if is_news:
+        # 5 – Google News (news / current-events / sports queries)
+        if is_news or is_sports:
             news = search_google_news(query)
             if news:
                 results['news'] = news
+
+        # 5b – TheSportsDB (structured player/team data for sports queries)
+        if is_sports:
+            sdb = search_thesportsdb(query)
+            if sdb:
+                results['sports'] = sdb
 
         # 6 – Reddit (general context, skip for pure music/book lookups)
         if not is_book:
@@ -786,6 +907,20 @@ def format_search_results_for_ai(search_results):
                 formatted += f"    Topics: {', '.join(book['subjects'][:4])}\n"
         has_content = True
 
+    # ---- TheSportsDB structured sports data ----
+    sports = search_results.get('sports')
+    if sports:
+        entity_type = sports.get('type', 'entity').capitalize()
+        formatted += f"\n**TheSportsDB – {entity_type}: {sports.get('name', '')}:**\n"
+        for field in ('sport', 'nationality', 'position', 'team', 'league',
+                      'country', 'stadium', 'formed', 'born', 'height',
+                      'weight', 'status', 'website'):
+            if sports.get(field):
+                formatted += f"  {field.capitalize()}: {sports[field]}\n"
+        if sports.get('description'):
+            formatted += f"  Bio: {sports['description']}\n"
+        has_content = True
+
     # ---- Reddit discussions ----
     reddit = search_results.get('reddit')
     if reddit:
@@ -841,6 +976,9 @@ def is_current_event_question(user_message):
         'when was', 'where is', 'how did',
         'discography', 'songs', 'albums', 'minister', 'pastor', 'artist',
         'singer', 'musician', 'actor', 'politician', 'author', 'founder',
+        # Sports
+        'player', 'team', 'squad', 'fixture', 'match result', 'standings',
+        'transfer', 'score', 'league table', 'champion', 'coach', 'manager',
     ]
 
     # Current year references

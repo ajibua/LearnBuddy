@@ -13,4 +13,6 @@ urlpatterns = [
     path('api/upload/', views.FileUploadView.as_view(), name='upload-file'),
     path('api/chat-history/', views.get_chat_history, name='chat-history'),
     path('api/current-user/', views.get_current_user, name='current-user'),
+    path('api/feedback/<int:message_id>/', views.feedback_api, name='feedback'),
+    path('api/regenerate/', views.regenerate_api, name='regenerate'),
 ]

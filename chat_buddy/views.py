@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
 from .models import StudyMaterial, ChatSession, ChatMessage
+from .ai_service import generate_session_title as _generate_title
 from .ai_service import summarize_pdf, summarize_image, summarize_document, ask_buddy
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -180,12 +181,15 @@ def get_chat_history(request):
             messages = session.messages.all().order_by('created_at')
             chat_data.append({
                 'session_id': session.id,
+                'title': session.title or '',
                 'created_at': session.created_at.isoformat(),
                 'material': session.study_material.file.name if session.study_material else None,
                 'messages': [
                     {
+                        'id': msg.id,
                         'type': msg.role,
-                        'text': msg.content
+                        'text': msg.content,
+                        'feedback': msg.feedback,
                     }
                     for msg in messages
                 ]
@@ -421,54 +425,30 @@ def chat_api(request):
         # Build system context for AI
         system_context = """You are LearnBuddy, a friendly and helpful AI study assistant with EXPERT-LEVEL mathematics expertise. Your personality:
 
-1. CHRISTIAN TOPICS: You are VERY engaged, encouraging, and knowledgeable about Biblical topics. 
-   - Provide Scripture references when relevant
-   - Encourage spiritual growth and Bible study
-   - Be warm and uplifting in discussing faith matters
-   - Quote relevant Bible verses to support your explanations
-   
-2. EDUCATIONAL CONTENT: You help students understand study materials deeply
+1. RELIGIOUS TOPICS: Warm, knowledgeable, and encouraging for any faith tradition.
+   - Provide Scripture references for Christian topics
+   - Be respectful and thoughtful across all religions
+   - Quote relevant texts to support explanations
+
+2. EDUCATIONAL CONTENT: Help students understand study materials deeply.
    - Break down complex topics into simple explanations
    - Provide examples and analogies
-   - Ask clarifying questions to ensure understanding
    - Be patient and supportive
-   
-3. MATHEMATICAL TOPICS: You are a MATHEMATICS GENIUS who helps students master math.
-   
-   CORE MATHEMATICS INSTRUCTIONS:
-   - Solve problems step-by-step with crystal clear explanations
-   - Use proper mathematical terminology (not LaTeX symbols)
-   - Never use raw symbols like $ or fractions like \frac{}{} - convert to readable formats
-   - Example: Instead of "x = \frac{12}{3}" write "x = 12 divided by 3 = 4"
-   - Example: Instead of "$x^2 + 5x + 6$" write "x squared plus 5x plus 6"
-   
-   FORMATTING FOR MATH:
-   - Use words for mathematical operations: "divided by", "times", "plus", "minus", "equals"
-   - Use "^" for exponents: "x^2 means x squared"
-   - Use "/" for fractions: "12/3 = 4" (read as "12 divided by 3 equals 4")
-   - Use special symbols when available: ≈ (approximately), ≠ (not equal), ≤ (less than or equal)
-   - Break equations into digestible parts with explanations between steps
-   
-   SOLVING PROBLEMS:
-   - Always show work step-by-step
-   - Label each step clearly: "Step 1:", "Step 2:", etc.
-   - Explain WHY you're doing each operation
-   - Highlight the final answer clearly
-   - Simplify to lowest terms and simplest form
-   - Show alternative methods when useful
-   
-   TONE FOR MATH:
-   - Make the student feel confident and capable
-   - Celebrate small victories in the problem
-   - Use encouraging language: "Great question!", "Let's break this down!", "You've got this!"
-   - Make complex math feel simple and achievable
-   - Help user feel like a mathematics genius when solving with you
-   
-4. INAPPROPRIATE CONTENT: Politely redirect to educational topics
-   - Stay professional and respectful
-   - Guide conversation back to learning
-   
-5. GENERAL TONE: Friendly, encouraging, and helpful with emojis for warmth"""
+
+3. MATHEMATICS: You are a MATHEMATICS GENIUS. For ALL math content you MUST:
+   - Use LaTeX notation exclusively — never write math in plain words.
+   - Inline expressions: wrap with $...$ e.g. $x^2 + 5x + 6$
+   - Display / block equations: wrap with $$...$$ on its own line.
+   - Use full LaTeX: \\frac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{n=0}^{\\infty}, \\sqrt{x}, \\lim_{x \\to 0}
+   - Greek letters: \\alpha, \\beta, \\pi, \\theta, \\Delta, \\Sigma, etc.
+   - NEVER write "integral from a to b" — write $$\\int_a^b f(x)\\,dx$$ instead.
+   - NEVER write "divided by", "times", "x squared" in plain words — use LaTeX.
+   - Show step-by-step solutions with each step clearly labelled and wrapped in LaTeX.
+   - If a SYMPY VERIFIED RESULT is provided, use that exact answer.
+
+4. INAPPROPRIATE CONTENT: Politely redirect to educational topics.
+
+5. GENERAL TONE: Friendly, encouraging, and helpful."""
 
         if is_inappropriate:
             response_text = "I'm designed to be a study assistant focused on educational content. I'd be happy to help you with academic materials, study questions, or discussions about faith and biblical principles. What can I help you learn about today?"
@@ -495,7 +475,7 @@ def chat_api(request):
                     conversation_history=conversation_history,
                     material_context=material_context,
                     system_context=system_context,
-                    is_christian_topic=is_christian_topic
+                    is_religion_topic=is_christian_topic
                 )
             except Exception as e:
                 # Fallback response if AI service fails
@@ -513,15 +493,28 @@ def chat_api(request):
             content=user_message
         )
         
-        ChatMessage.objects.create(
+        assistant_msg = ChatMessage.objects.create(
             session=session,
             role='assistant',
             content=response_text
         )
+
+        # Generate title after the very first exchange
+        session_title = session.title or ''
+        if not session_title:
+            msg_count = session.messages.count()  # now includes the two we just saved
+            if msg_count <= 2:
+                generated = _generate_title(user_message, response_text)
+                if generated:
+                    session.title = generated
+                    session.save(update_fields=['title'])
+                    session_title = generated
         
         return JsonResponse({
             'response': response_text,
-            'session_id': session.id,  # Send back to frontend
+            'message_id': assistant_msg.id,
+            'session_id': session.id,
+            'session_title': session_title,
             'timestamp': str(session.created_at)
         })
         
@@ -627,7 +620,7 @@ class FileUploadView(APIView):
                     )
 
                 # Store the user's upload message so it appears in conversation history.
-                user_bubble = f"\ud83d\udcce {uploaded_file.name}"
+                user_bubble = f"Attached: {uploaded_file.name}"
                 if user_message:
                     user_bubble += f"\n\n{user_message}"
                 ChatMessage.objects.create(
@@ -666,3 +659,91 @@ class FileUploadView(APIView):
             traceback.print_exc()
             return Response({'error': f'Failed to process file: {str(e)}'}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def feedback_api(request, message_id):
+    """Save thumbs-up / thumbs-down feedback on an assistant message."""
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+
+    value = request.data.get('feedback')  # 'up' or 'down'
+    if value not in ('up', 'down'):
+        return JsonResponse({'error': 'Invalid feedback value'}, status=400)
+
+    try:
+        msg = ChatMessage.objects.get(id=message_id, session__user=request.user, role='assistant')
+        msg.feedback = value
+        msg.save(update_fields=['feedback'])
+        return JsonResponse({'status': 'ok', 'feedback': value})
+    except ChatMessage.DoesNotExist:
+        return JsonResponse({'error': 'Message not found'}, status=404)
+
+
+@api_view(['POST'])
+def regenerate_api(request):
+    """Delete the last assistant message and re-generate a fresh response."""
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+
+    session_id = request.data.get('session_id')
+    if not session_id:
+        return JsonResponse({'error': 'session_id required'}, status=400)
+
+    try:
+        session = ChatSession.objects.get(id=session_id, user=request.user)
+    except ChatSession.DoesNotExist:
+        return JsonResponse({'error': 'Session not found'}, status=404)
+
+    # Find and delete the last assistant message
+    last_assistant = session.messages.filter(role='assistant').last()
+    if last_assistant:
+        last_assistant.delete()
+
+    # Find the last user message to replay
+    last_user = session.messages.filter(role='user').last()
+    if not last_user:
+        return JsonResponse({'error': 'No user message to regenerate from'}, status=400)
+
+    user_message = last_user.content
+
+    # Rebuild context (same logic as chat_api)
+    material_context = None
+    if session.study_material:
+        material = session.study_material
+        material_context = f"Document Context ({material.file.name}):\n{material.summary}"
+
+    christian_keywords = ['god', 'jesus', 'christ', 'bible', 'scripture', 'prayer',
+                          'faith', 'christian', 'church', 'lord', 'salvation',
+                          'gospel', 'holy spirit', 'worship']
+    is_christian_topic = any(kw in user_message.lower() for kw in christian_keywords)
+
+    conversation_history = []
+    for msg in session.messages.order_by('created_at')[:30]:
+        conversation_history.append({
+            'role': msg.role if msg.role in ['user', 'assistant'] else 'user',
+            'parts': [msg.content],
+            'text': msg.content,
+        })
+
+    try:
+        response_text = ask_buddy(
+            user_message,
+            conversation_history=conversation_history,
+            material_context=material_context,
+            is_religion_topic=is_christian_topic,
+        )
+    except Exception as e:
+        response_text = f"Sorry, I couldn't regenerate a response. (Error: {str(e)})"
+
+    new_msg = ChatMessage.objects.create(
+        session=session,
+        role='assistant',
+        content=response_text,
+    )
+
+    return JsonResponse({
+        'response': response_text,
+        'message_id': new_msg.id,
+        'session_id': session.id,
+    })

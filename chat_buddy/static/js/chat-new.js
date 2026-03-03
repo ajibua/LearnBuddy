@@ -6,7 +6,7 @@ let isLoading = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    loadTheme();                // restore dark/light preference
+    document.body.classList.add('light-mode');  // always use light mode
     initializeEventListeners();
     updateUserProfile();        // fetch and update current user profile
     loadChatHistory();
@@ -179,8 +179,8 @@ async function processFile() {
     const welcomeSection = document.querySelector('.welcome-section');
     if (welcomeSection) welcomeSection.remove();
     const bubbleContent = userMessage
-        ? `📎 **${currentFile.name}**\n\n${userMessage}`
-        : `📎 **${currentFile.name}**`;
+        ? `Attached: **${currentFile.name}**\n\n${userMessage}`
+        : `Attached: **${currentFile.name}**`;
     addMessage('user', bubbleContent);
 
     closeUploadPanel();
@@ -207,14 +207,14 @@ async function processFile() {
             }
             
             // Add assistant message with summary
-            addMessage('assistant', `✅ **${data.filename}** uploaded successfully!\n\n**📝 Summary:**\n\n${data.summary}\n\nFeel free to ask me any questions about this material!`);
+            addMessage('assistant', `**${data.filename}** uploaded successfully!\n\n**Summary:**\n\n${data.summary}\n\nFeel free to ask me any questions about this material!`);
             updateChatTitle(data.filename, data.filename);
         } else {
-            addMessage('assistant', `❌ Error: ${data.error}`);
+            addMessage('assistant', `Error: ${data.error}`);
         }
     } catch (error) {
         removeLoadingIndicator();
-        addMessage('assistant', '❌ Error uploading file. Please try again.');
+        addMessage('assistant', 'Error uploading file. Please try again.');
         console.error('Error:', error);
     }
 }
@@ -257,12 +257,19 @@ async function sendMessage() {
 
         if (response.ok) {
             const data = await response.json();
-            addMessage('assistant', data.response);
+            addMessage('assistant', data.response, data.message_id);
             // CRITICAL: persist the real DB session_id for conversation continuity
             if (data.session_id) {
                 currentSessionId = data.session_id;
             }
-            updateChatTitle(message);
+            // Use AI-generated title if returned (first exchange only), else fall back to user message
+            if (data.session_title) {
+                updateChatTitle(data.session_title);
+                // Also update the matching sidebar item so it reflects the new title immediately
+                updateSidebarTitle(data.session_id, data.session_title);
+            } else {
+                updateChatTitle(message);
+            }
         } else {
             addMessage('assistant', 'Sorry, I encountered an error. Please try again.');
         }
@@ -426,37 +433,95 @@ function cleanMathNotation(text) {
     return text;
 }
 
-function addMessage(role, content) {
+// Render message content: protect LaTeX from marked, then render with KaTeX
+function renderMessageContent(content) {
+    const mathBlocks = [];
+
+    // Extract $$...$$ display math
+    let processed = content.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
+        const idx = mathBlocks.length;
+        mathBlocks.push({ src: match, display: true });
+        return `\x02MATH${idx}\x03`;
+    });
+
+    // Extract $...$ inline math (single-line only)
+    processed = processed.replace(/\$([^\$\n]+?)\$/g, (match) => {
+        const idx = mathBlocks.length;
+        mathBlocks.push({ src: match, display: false });
+        return `\x02MATH${idx}\x03`;
+    });
+
+    // Parse markdown (LaTeX is protected as placeholders)
+    let html = marked.parse(processed);
+
+    // Restore math placeholders with rendered KaTeX
+    html = html.replace(/\x02MATH(\d+)\x03/g, (_, i) => {
+        const block = mathBlocks[parseInt(i)];
+        try {
+            // Strip outer $ delimiters before rendering
+            const tex = block.display
+                ? block.src.slice(2, -2).trim()
+                : block.src.slice(1, -1).trim();
+            return katex.renderToString(tex, { displayMode: block.display, throwOnError: false });
+        } catch (e) {
+            return block.src; // fall back to raw LaTeX on error
+        }
+    });
+
+    return html;
+}
+
+function addMessage(role, content, messageId = null) {
     const messagesList = document.getElementById('messagesList');
     
-    // Create message element
     const messageEl = document.createElement('div');
     messageEl.className = `message ${role}`;
+    if (messageId) messageEl.dataset.messageId = messageId;
     
-    const contentEl = document.createElement('div');
-    contentEl.className = 'message-content';
-    
-    // Parse and render markdown for assistant messages
     if (role === 'assistant') {
-        // Clean up LaTeX notation first
-        const cleanedContent = cleanMathNotation(content);
-        contentEl.innerHTML = marked.parse(cleanedContent);
+        // Column wrapper: bubble → actions → time
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'message-body';
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'message-content';
+        contentEl.innerHTML = renderMessageContent(content);
+        bodyEl.appendChild(contentEl);
+
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'message-actions';
+        actionsEl.innerHTML = `
+            <button class="action-btn feedback-btn" data-value="up" title="Good response" onclick="submitFeedback(this)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+            </button>
+            <button class="action-btn feedback-btn" data-value="down" title="Poor response" onclick="submitFeedback(this)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+            </button>
+            <button class="action-btn regenerate-btn" title="Get another response" onclick="regenerateResponse(this)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+        `;
+        bodyEl.appendChild(actionsEl);
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'message-time';
+        timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        bodyEl.appendChild(timeEl);
+
+        messageEl.appendChild(bodyEl);
     } else {
-        // User messages as plain text
+        const contentEl = document.createElement('div');
+        contentEl.className = 'message-content';
         contentEl.textContent = content;
+        messageEl.appendChild(contentEl);
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'message-time';
+        timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        messageEl.appendChild(timeEl);
     }
     
-    messageEl.appendChild(contentEl);
-    
-    // Add time
-    const timeEl = document.createElement('div');
-    timeEl.className = 'message-time';
-    timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    messageEl.appendChild(timeEl);
-    
     messagesList.appendChild(messageEl);
-    
-    // Scroll to bottom
     document.getElementById('messagesContainer').scrollTop = document.getElementById('messagesContainer').scrollHeight;
 }
 
@@ -490,9 +555,8 @@ function updateChatTitle(context, material = null) {
     if (material) {
         title = material.split('/').pop(); // Get filename from path
     } else if (context && context.length > 0) {
-        // Extract first sentence or question from context
-        const sentences = context.split(/[.!?]/)[0]; // Get first sentence
-        title = sentences.substring(0, 50) + (sentences.length > 50 ? '...' : '');
+        // Trim if too long (only needed for raw message fallback)
+        title = context.substring(0, 60) + (context.length > 60 ? '...' : '');
     }
     
     // Clean up common prefixes
@@ -503,6 +567,17 @@ function updateChatTitle(context, material = null) {
     // Show today's date as subtitle only
     const today = new Date();
     document.getElementById('chatSubtitle').textContent = today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function updateSidebarTitle(sessionId, title) {
+    // Find the sidebar chat-item that matches this session and update its title
+    document.querySelectorAll('.chat-item').forEach(item => {
+        if (item.dataset.sessionId == sessionId) {
+            const titleEl = item.querySelector('.chat-item-title');
+            if (titleEl) titleEl.textContent = title;
+            item.title = title;
+        }
+    });
 }
 
 function startNewChat() {
@@ -561,13 +636,16 @@ function loadChatHistory() {
             const container = document.getElementById('chatListContainer');
             if (data.sessions && data.sessions.length > 0) {
                 data.sessions.forEach(session => {
-                    // Get first user message as preview
+                    // Prefer AI-generated title, fall back to first user message
                     const firstMessage = session.messages.find(m => m.type === 'user');
                     const preview = firstMessage ? firstMessage.text.substring(0, 30) + (firstMessage.text.length > 30 ? '...' : '') : 'Chat';
-                    const title = session.material ? session.material.split('/').pop() : preview;
+                    const title = session.material
+                        ? session.material.split('/').pop()
+                        : (session.title || preview);
                     
                     const item = document.createElement('div');
                     item.className = 'chat-item';
+                    item.dataset.sessionId = session.session_id;
                     item.title = title; // Show full title on hover
                     item.innerHTML = `
                         <div class="chat-item-title">${title}</div>
@@ -607,12 +685,12 @@ function loadChat(sessionId) {
                 
                 // Load all messages from this session
                 session.messages.forEach(msg => {
-                    addMessage(msg.type, msg.text);
+                    addMessage(msg.type, msg.text, msg.type === 'assistant' ? msg.id : null);
                 });
                 
-                // Update title with material name or first user message
+                // Update title with stored title, material name, or first user message
                 const firstUserMessage = session.messages.find(m => m.type === 'user');
-                const titleContext = firstUserMessage ? firstUserMessage.text : 'Chat';
+                const titleContext = session.title || (firstUserMessage ? firstUserMessage.text : 'Chat');
                 updateChatTitle(titleContext, session.material);
             }
         })
@@ -643,23 +721,73 @@ function toggleProfileDropdown() {
     btn.classList.toggle('dropdown-open', isActive);
 }
 
-function toggleTheme() {
-    const isLight = document.body.classList.toggle('light-mode');
-    localStorage.setItem('learnbuddy-theme', isLight ? 'light' : 'dark');
-    const label = document.getElementById('themeLabel');
-    if (label) label.textContent = isLight ? 'Dark Mode' : 'Light Mode';
-}
+async function submitFeedback(btn) {
+    const messageEl = btn.closest('.message');
+    const messageId = messageEl?.dataset.messageId;
+    if (!messageId) return;
 
-function loadTheme() {
-    const saved = localStorage.getItem('learnbuddy-theme');
-    if (saved === 'light') {
-        document.body.classList.add('light-mode');
-        const label = document.getElementById('themeLabel');
-        if (label) label.textContent = 'Dark Mode';
+    const value = btn.dataset.value; // 'up' or 'down'
+
+    // Visual state
+    messageEl.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    try {
+        await fetch(`/api/feedback/${messageId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: JSON.stringify({ feedback: value }),
+        });
+    } catch (e) {
+        console.error('Feedback error:', e);
     }
 }
 
-// Close profile dropdown and sidebar when clicking outside
+async function regenerateResponse(btn) {
+    if (isLoading) return;
+    if (!currentSessionId) return;
+
+    const messageEl = btn.closest('.message');
+
+    // Replace content with loading dots
+    const contentEl = messageEl.querySelector('.message-content');
+    const originalHTML = contentEl.innerHTML;
+    contentEl.innerHTML = '<span class="regen-loading"></span>';
+    btn.disabled = true;
+    isLoading = true;
+
+    try {
+        const response = await fetch('/api/regenerate/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: JSON.stringify({ session_id: currentSessionId }),
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            contentEl.innerHTML = renderMessageContent(data.response);
+            if (data.message_id) messageEl.dataset.messageId = data.message_id;
+            // Reset any previous feedback highlight
+            messageEl.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('active'));
+        } else {
+            contentEl.innerHTML = originalHTML;
+        }
+    } catch (e) {
+        contentEl.innerHTML = originalHTML;
+        console.error('Regenerate error:', e);
+    } finally {
+        btn.disabled = false;
+        isLoading = false;
+    }
+}
+
+// Close profile dropdown
 document.addEventListener('click', (e) => {
     const profileSection = document.querySelector('.profile-section');
     if (profileSection && !profileSection.contains(e.target)) {
