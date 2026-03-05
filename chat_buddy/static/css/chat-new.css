@@ -324,6 +324,7 @@ body {
 
 .chat-header {
     padding: 1.5rem 2rem;
+    padding-top: calc(1.5rem + env(safe-area-inset-top, 0px));
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
@@ -932,7 +933,8 @@ body.light-mode .logo {
 
     /* Header: tighter on mobile */
     .chat-header {
-        padding: 0.75rem 1rem;
+        padding: 0.5rem 1rem;
+        padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
     }
     .chat-header h1 {
         font-size: 1.1rem;
