@@ -60,7 +60,6 @@ def login_view(request):
         
         if user is not None:
             auth_login(request, user)
-            messages.success(request, f'Welcome back, {user.first_name or user.username}!')
             return redirect('chat')
         else:
             messages.error(request, 'Invalid username/email or password.')
@@ -93,7 +92,6 @@ def signup_view(request):
             # Create user
             user = User.objects.create_user(username=username, email=email, password=password)
             auth_login(request, user)
-            messages.success(request, 'Account created successfully! Welcome to LearnBuddy.')
             return redirect('chat')
     
     return render(request, 'signup.html')
