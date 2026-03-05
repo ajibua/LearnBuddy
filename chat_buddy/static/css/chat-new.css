@@ -21,12 +21,16 @@
     --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+html {
+    background: #ffffff; /* matches light-mode chat header — no gap on Android */
+}
+
 body {
     background: linear-gradient(135deg, #0f172a 0%, #1a1a3e 100%);
     color: var(--text-primary);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     height: 100vh;
-    height: 100dvh; /* dynamic — accounts for mobile keyboard & browser chrome */
+    height: 100dvh;
     overflow: hidden;
     font-variant-numeric: normal;
 }
@@ -873,6 +877,10 @@ body.light-mode {
     --text-secondary: #64748b;
     --border: #e2e8f0;
     background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+}
+
+html:has(body.light-mode) {
+    background: #f0f9ff; /* match light mode top colour so no strip shows */
 }
 
 body.light-mode .sidebar,
