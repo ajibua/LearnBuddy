@@ -43,7 +43,8 @@ except:
 # Initialize Google Generative AI with proper error handling
 google_api_key = getattr(settings, 'GOOGLE_API_KEY', None) or os.getenv('GOOGLE_API_KEY')
 if not google_api_key:
-    raise ValueError("GOOGLE_API_KEY is not set. Please add it to your .env file or Django settings.")
+    print("WARNING: GOOGLE_API_KEY is not set. AI features will not work until it is configured.")
+    google_api_key = 'not-configured'
 
 genai.configure(api_key=google_api_key)
 model = genai.GenerativeModel('gemini-2.5-flash')
