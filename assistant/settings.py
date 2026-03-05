@@ -136,7 +136,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [
     BASE_DIR / 'chat_buddy' / 'static'
@@ -147,8 +147,17 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Allow same-origin iframes (needed for inline document viewer)
 X_FRAME_OPTIONS = 'SAMEORIGIN'
-# WhiteNoise static file cache control (1 year)
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# WhiteNoise static file storage — Django 6.0 requires the STORAGES dict
+# (STATICFILES_STORAGE was removed in Django 4.2+ deprecation cycle)
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+    },
+}
 
 # Security Settings for Production
 if not DEBUG:
