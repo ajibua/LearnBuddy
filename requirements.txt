@@ -4,11 +4,15 @@ djangorestframework==3.14.0
 django-cors-headers==4.3.1
 
 # AI & APIs
-google-generativeai==0.3.0
+google-generativeai==0.8.6
 python-dotenv==1.0.0
 
-# Mathematics
+# Mathematics & STEM Computing
 sympy==1.13.3
+scipy
+numpy
+pint
+chempy
 
 # Document Processing
 PyPDF2==3.0.1

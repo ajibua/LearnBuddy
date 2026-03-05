@@ -1061,3 +1061,150 @@ body.light-mode .logo {
     background: rgba(59, 130, 246, 0.1);
     font-weight: 600;
 }
+
+/* ========== DOCUMENT VIEWER PANEL ========== */
+.doc-viewer {
+    width: 0;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.doc-viewer.open {
+    width: 45%;
+    min-width: 320px;
+}
+
+.doc-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+.doc-viewer-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.doc-viewer-info svg {
+    flex-shrink: 0;
+    color: var(--primary);
+}
+
+#docViewerName {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.doc-viewer-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.4rem;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    flex-shrink: 0;
+}
+
+.doc-viewer-close-btn:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.doc-viewer-body {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.doc-viewer-body iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    flex: 1;
+}
+
+.doc-viewer-body img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 1rem;
+}
+
+/* View Document header button */
+.view-doc-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.9rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 0.6rem;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: var(--transition);
+    margin-right: 0.75rem;
+    white-space: nowrap;
+}
+
+.view-doc-btn:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: var(--primary);
+}
+
+.view-doc-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+/* Responsive: doc viewer stacks below on small screens */
+@media (max-width: 900px) {
+    .doc-viewer.open {
+        width: 100%;
+        height: 45vh;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .chat-wrapper {
+        flex-direction: column;
+    }
+
+    .chat-wrapper .sidebar {
+        display: none;
+    }
+
+    .chat-wrapper .sidebar.open {
+        display: flex;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 280px;
+        z-index: 500;
+    }
+}

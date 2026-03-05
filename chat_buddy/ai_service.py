@@ -49,7 +49,7 @@ genai.configure(api_key=google_api_key)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # ---------------------------------------------------------------------------
-# SymPy math engine
+# SymPy math engine (symbolic algebra, calculus, ODEs, linear algebra)
 # ---------------------------------------------------------------------------
 try:
     import sympy as sp
@@ -57,6 +57,43 @@ try:
 except ImportError:
     SYMPY_AVAILABLE = False
     print("Warning: SymPy not installed. pip install sympy to enable verified math solving.")
+
+# ---------------------------------------------------------------------------
+# SciPy + NumPy engine (physics, engineering, numerical computing)
+# ---------------------------------------------------------------------------
+try:
+    import scipy
+    import scipy.optimize
+    import scipy.integrate
+    import scipy.linalg
+    import scipy.stats
+    import scipy.constants
+    import numpy as np
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    print("Warning: SciPy/NumPy not installed. pip install scipy numpy to enable physics/engineering solving.")
+
+# ---------------------------------------------------------------------------
+# Pint engine (unit-aware physics/engineering calculations)
+# ---------------------------------------------------------------------------
+try:
+    import pint
+    _ureg = pint.UnitRegistry()
+    PINT_AVAILABLE = True
+except ImportError:
+    PINT_AVAILABLE = False
+    print("Warning: Pint not installed. pip install pint to enable unit-aware calculations.")
+
+# ---------------------------------------------------------------------------
+# ChemPy engine (chemistry: stoichiometry, equilibrium, thermochemistry)
+# ---------------------------------------------------------------------------
+try:
+    import chempy
+    CHEMPY_AVAILABLE = True
+except ImportError:
+    CHEMPY_AVAILABLE = False
+    print("Warning: ChemPy not installed. pip install chempy to enable chemistry solving.")
 
 _MATH_KEYWORDS = {
     'solve', 'calculate', 'compute', 'evaluate', 'simplify', 'differentiate',
@@ -73,6 +110,77 @@ def is_math_computation_problem(message: str) -> bool:
         return True
     # Contains common math expressions
     if re.search(r'[\^=√∫∑∏]|d/dx|\bx\b.*=|\bf\(x\)', lower):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Physics / Engineering field detection
+# ---------------------------------------------------------------------------
+_PHYSICS_ENGINEERING_KEYWORDS = {
+    # Mechanics
+    'velocity', 'acceleration', 'force', 'momentum', 'impulse', 'torque', 'angular',
+    'friction', 'gravity', 'gravitational', 'kinematics', 'dynamics', 'statics',
+    'projectile', 'trajectory', 'centripetal', 'centrifugal',
+    # Energy / Work / Power
+    'kinetic energy', 'potential energy', 'joule', 'watt',
+    # Thermodynamics
+    'temperature', 'heat', 'entropy', 'pressure', 'ideal gas',
+    'thermodynamics', 'carnot', 'kelvin', 'celsius', 'boyle', 'charles',
+    # Electromagnetism
+    'voltage', 'current', 'resistance', 'capacitance', 'inductance', 'impedance',
+    'circuit', 'ohm', 'ampere', 'farad', 'henry', 'coulomb',
+    'electric field', 'magnetic field', 'flux', 'electromagnetic',
+    # Waves / Optics
+    'wavelength', 'frequency', 'amplitude', 'oscillation', 'resonance',
+    'refraction', 'reflection', 'diffraction', 'interference', 'optics',
+    # Quantum / Modern
+    'photon', 'quantum', 'relativity', 'nuclear',
+    # Engineering
+    'stress', 'strain', 'modulus', 'elasticity', 'shear', 'bending',
+    'resistor', 'capacitor', 'inductor', 'transistor', 'diode',
+    # Units (strong signal)
+    'newton', 'pascal', 'hertz', 'tesla', 'siemens',
+}
+
+def is_physics_engineering_problem(message: str) -> bool:
+    """Return True when the message is likely a physics or engineering computation."""
+    lower = message.lower()
+    if any(kw in lower for kw in _PHYSICS_ENGINEERING_KEYWORDS):
+        return True
+    # Unit patterns: "5 m/s", "3 kg", "10 N", "220 V"
+    if re.search(r'\d+\s*(m/s|km/h|\bkg\b|m/s²|\bN\b|\bPa\b|\bJ\b|\bW\b|\bV\b|\bA\b|\bHz\b|rad/s)', message):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Chemistry field detection
+# ---------------------------------------------------------------------------
+_CHEMISTRY_KEYWORDS = {
+    'mole', 'molar', 'molarity', 'molality', 'concentration',
+    'stoichiometry', 'stoichiometric',
+    'acid', 'base', 'ph', 'buffer', 'titration', 'neutralization',
+    'oxidation', 'reduction', 'redox',
+    'gibbs', 'thermochemistry', 'hess',
+    'equilibrium', 'rate constant', 'reaction rate',
+    'periodic table', 'atomic number', 'atomic mass', 'isotope', 'atomic weight',
+    'organic chemistry', 'functional group', 'hydrocarbon', 'polymer',
+    'reactant', 'product', 'yield', 'catalyst',
+    'electron configuration', 'valence', 'orbital', 'hybridization',
+    'electrochemistry', 'cell potential', 'faraday',
+    'avogadro', 'dalton', 'ideal gas law',
+    'solubility', 'precipitate', 'dissolution',
+    'chemical equation', 'balance the equation', 'balanced equation',
+}
+
+def is_chemistry_problem(message: str) -> bool:
+    """Return True when the message is likely a chemistry computation."""
+    lower = message.lower()
+    if any(kw in lower for kw in _CHEMISTRY_KEYWORDS):
+        return True
+    # Chemical formula: H2O, CO2, NaCl, H2SO4, C6H12O6
+    if re.search(r'\b[A-Z][a-z]?\d*(?:[A-Z][a-z]?\d*){1,}\b', message):
         return True
     return False
 
@@ -121,6 +229,110 @@ def solve_with_sympy(problem_description: str):
     except Exception as exc:
         print(f"SymPy solver error (non-blocking): {exc}")
         return None, None
+
+
+def solve_with_scipy_pint(problem_description: str):
+    """
+    Ask Gemini to generate SciPy/NumPy/Pint code for a physics or engineering
+    problem, execute it safely, and return a plain-text result string.
+    Returns None on failure.
+    """
+    if not SCIPY_AVAILABLE:
+        return None
+    try:
+        code_prompt = (
+            "Write self-contained Python code using SciPy, NumPy, and optionally Pint "
+            "to solve the following physics or engineering problem.\n"
+            "Rules:\n"
+            "- Import scipy, numpy as np, and pint at the top as needed.\n"
+            "- Store a human-readable string of the final answer in a variable called `result`.\n"
+            "- Include units in `result` where relevant (e.g. '9.81 m/s²', '220 V').\n"
+            "- Output ONLY the raw Python code — no markdown fences, no prose.\n\n"
+            f"Problem: {problem_description}"
+        )
+        code_response = model.generate_content(code_prompt)
+        code = code_response.text.strip()
+        code = re.sub(r'^```(?:python)?\s*', '', code, flags=re.MULTILINE)
+        code = re.sub(r'```\s*$', '', code, flags=re.MULTILINE)
+        code = code.strip()
+
+        namespace = {
+            '__builtins__': {
+                'print': print, 'range': range, 'len': len, 'list': list,
+                'dict': dict, 'set': set, 'tuple': tuple, 'int': int,
+                'float': float, 'str': str, 'bool': bool, 'abs': abs,
+                'round': round, 'enumerate': enumerate, 'zip': zip,
+                'map': map, 'min': min, 'max': max, 'sum': sum,
+                '__import__': __import__,
+            },
+            'scipy': scipy,
+            'np': np,
+            'numpy': np,
+        }
+        if PINT_AVAILABLE:
+            namespace['pint'] = pint
+            namespace['ureg'] = pint.UnitRegistry()
+
+        exec(code, namespace)
+        result = namespace.get('result')
+        return str(result) if result is not None else None
+    except Exception as exc:
+        print(f"SciPy/Pint solver error (non-blocking): {exc}")
+        return None
+
+
+def solve_chemistry(problem_description: str):
+    """
+    Ask Gemini to generate ChemPy/SciPy/NumPy code for a chemistry problem,
+    execute it safely, and return a plain-text result string.
+    Returns None on failure.
+    """
+    if not CHEMPY_AVAILABLE and not SCIPY_AVAILABLE:
+        return None
+    try:
+        code_prompt = (
+            "Write self-contained Python code using ChemPy and/or SciPy/NumPy "
+            "to solve the following chemistry problem.\n"
+            "Rules:\n"
+            "- Import chempy, scipy, numpy as np at the top as needed.\n"
+            "- Store a human-readable string summary of the final answer in a variable called `result`.\n"
+            "- For stoichiometry: include molar masses, moles, and amounts with units.\n"
+            "- For equilibrium: include equilibrium concentrations and Kc/Kp.\n"
+            "- For thermochemistry: include ΔH, ΔS, ΔG with units.\n"
+            "- For pH: include the pH value and relevant ion concentrations.\n"
+            "- Output ONLY the raw Python code — no markdown fences, no prose.\n\n"
+            f"Problem: {problem_description}"
+        )
+        code_response = model.generate_content(code_prompt)
+        code = code_response.text.strip()
+        code = re.sub(r'^```(?:python)?\s*', '', code, flags=re.MULTILINE)
+        code = re.sub(r'```\s*$', '', code, flags=re.MULTILINE)
+        code = code.strip()
+
+        namespace = {
+            '__builtins__': {
+                'print': print, 'range': range, 'len': len, 'list': list,
+                'dict': dict, 'set': set, 'tuple': tuple, 'int': int,
+                'float': float, 'str': str, 'bool': bool, 'abs': abs,
+                'round': round, 'enumerate': enumerate, 'zip': zip,
+                'map': map, 'min': min, 'max': max, 'sum': sum, 'sorted': sorted,
+                '__import__': __import__,
+            },
+        }
+        if SCIPY_AVAILABLE:
+            namespace['scipy'] = scipy
+            namespace['np'] = np
+            namespace['numpy'] = np
+        if CHEMPY_AVAILABLE:
+            namespace['chempy'] = chempy
+
+        exec(code, namespace)
+        result = namespace.get('result')
+        return str(result) if result is not None else None
+    except Exception as exc:
+        print(f"ChemPy solver error (non-blocking): {exc}")
+        return None
+
 
 _SCANNER_WATERMARKS = [
     'camscanner', 'adobe scan', 'microsoft lens', 'genius scan',
@@ -587,7 +799,8 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
    - NEVER write "integral from a to b" — write $$\\int_a^b f(x)\\,dx$$ instead.
    - NEVER use Unicode superscripts (², ³) — use $x^2$, $x^3$.
    - Show step-by-step solutions with each step wrapped in LaTeX.
-   - If a SYMPY VERIFIED RESULT is provided below, use that exact answer."""
+   - If a SYMPY / SCIPY / CHEMPY VERIFIED RESULT is provided below, use that exact answer.
+5. INTERNAL CONTEXT RULES: The prompt may contain blocks labelled 'SYMPY VERIFIED RESULT', 'SCIPY/PINT NUMERICAL RESULT', 'CHEMPY VERIFIED RESULT', 'STUDY MATERIAL CONTEXT', or 'Previous conversation'. These are SILENT internal hints for you only. NEVER copy, quote, repeat, or reference these block labels or their raw content in your reply. Use the values to inform your answer, but write naturally as if you computed them yourself."""
 
         if system_context:
             system_message = system_context
@@ -605,17 +818,33 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
                 # Don't break the chat if search fails - just continue without it
                 print(f"Web search error (non-blocking): {e}")
 
-        # Attempt SymPy-verified computation for maths questions
-        sympy_context = ""
+        # --------------- STEM verified solvers ---------------
+        stem_context = ""
+
+        # 1. Math → SymPy (symbolic / exact)
         if is_math_computation_problem(user_message):
             sympy_plain, sympy_latex = solve_with_sympy(user_message)
             if sympy_plain:
-                sympy_context = (
+                stem_context += (
                     f"SYMPY VERIFIED RESULT (computed symbolically — use this exact answer):\n"
                     f"  Plain:  {sympy_plain}\n"
-                    f"  LaTeX:  ${sympy_latex}$\n"
+                    f"  LaTeX:  ${sympy_latex}$\n\n"
                 )
                 print(f"SymPy result for '{user_message[:60]}': {sympy_plain}")
+
+        # 2. Physics / Engineering → SciPy + Pint (numerical)
+        if is_physics_engineering_problem(user_message):
+            sci_result = solve_with_scipy_pint(user_message)
+            if sci_result:
+                stem_context += f"SCIPY/PINT NUMERICAL RESULT (use this exact value):\n  {sci_result}\n\n"
+                print(f"SciPy result for '{user_message[:60]}': {sci_result}")
+
+        # 3. Chemistry → ChemPy + SciPy
+        if is_chemistry_problem(user_message):
+            chem_result = solve_chemistry(user_message)
+            if chem_result:
+                stem_context += f"CHEMPY VERIFIED RESULT (use this exact value):\n  {chem_result}\n\n"
+                print(f"ChemPy result for '{user_message[:60]}': {chem_result}")
         
         # Build conversation context
         conversation_text = ""
@@ -653,8 +882,8 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         if current_event_info:
             full_prompt += current_event_info + "\n"
 
-        if sympy_context:
-            full_prompt += sympy_context + "\n"
+        if stem_context:
+            full_prompt += stem_context + "\n"
 
         if is_religion_topic:
             full_prompt += "The user is asking about religious topics. Respond with warmth, scriptural and logical references using clear headers.\n\n"
@@ -663,6 +892,15 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         
         response = model.generate_content(full_prompt)
         result = response.text
+
+        # Safety net: strip any leaked internal context block headers from the response
+        _internal_block_pattern = re.compile(
+            r'(?:SYMPY VERIFIED RESULT|SCIPY/PINT NUMERICAL RESULT|CHEMPY VERIFIED RESULT|STUDY MATERIAL CONTEXT)'
+            r'[^\n]*\n(?:\s+[^\n]+\n)*',
+            re.IGNORECASE
+        )
+        result = _internal_block_pattern.sub('', result).strip()
+
         return result
         
     except Exception as e:

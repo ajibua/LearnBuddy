@@ -60,6 +60,27 @@
             </div>
         </aside>
 
+        <!-- Document Viewer Panel -->
+        <div class="doc-viewer" id="docViewer">
+            <div class="doc-viewer-header">
+                <div class="doc-viewer-info">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <span id="docViewerName">Document</span>
+                </div>
+                <button class="doc-viewer-close-btn" onclick="closeDocViewer()" title="Close viewer">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="doc-viewer-body" id="docViewerBody">
+                <!-- PDF iframe or image injected by JS -->
+            </div>
+        </div>
+
         <!-- Main Chat Area -->
         <main class="chat-main">
             <!-- Chat Header -->
@@ -68,6 +89,13 @@
                     <h1 id="chatTitle">Welcome to LearnBuddy</h1>
                     <p id="chatSubtitle" class="subtitle">Upload materials and start learning</p>
                 </div>
+                <button class="view-doc-btn" id="viewDocBtn" onclick="toggleDocViewer()" style="display:none" title="Toggle document viewer">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <span>View Doc</span>
+                </button>
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M4 6h16M4 12h16M4 18h16"/>

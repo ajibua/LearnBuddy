@@ -33,14 +33,16 @@ DEBUG = os.getenv('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    '.railway.app',# Railway default domains
-    'https://learnbuddy.up.railway.app/',  # Your Railway app domain
-    'learnbuddy.com',  # Your custom domain
-    'www.learnbuddy.com',  # With www subdomain
+    '.up.railway.app',           # All Railway subdomains
+    'learnbuddy.up.railway.app', # Your specific Railway app
     os.getenv('RAILWAY_STATIC_URL', '').replace('http://', '').replace('https://', '').split('/')[0] if os.getenv('RAILWAY_STATIC_URL') else '',
     os.getenv('DOMAIN', '')  # Custom domain from env variable
 ]
 ALLOWED_HOSTS = [h for h in ALLOWED_HOSTS if h]  # Remove empty strings
+
+# Trust Railway's SSL-terminating reverse proxy
+# Without this, SECURE_SSL_REDIRECT causes an infinite redirect loop on Railway
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Application definition
@@ -139,7 +141,12 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [
     BASE_DIR / 'chat_buddy' / 'static'
 ]
+# Media files (user uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# Allow same-origin iframes (needed for inline document viewer)
+X_FRAME_OPTIONS = 'SAMEORIGIN'
 # WhiteNoise static file cache control (1 year)
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
@@ -152,7 +159,6 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     SECURE_BROWSER_XSS_FILTER = True
-    X_FRAME_OPTIONS = 'DENY'
     SECURE_CONTENT_SECURITY_POLICY = {
         'default-src': ("'self'",),
         'script-src': ("'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'),

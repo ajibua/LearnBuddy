@@ -4,6 +4,11 @@ let chatSessions = [];
 let currentSessionId = null;
 let isLoading = false;
 
+// ---- Document Viewer State ----
+let currentMaterialUrl = null;
+let currentMaterialType = null;
+let currentMaterialName = null;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.add('light-mode');  // always use light mode
@@ -141,13 +146,49 @@ function handleFileUpload(e) {
     currentFile = file;
     
     // Format file size
-    const fileSize = (file.size / 1024 / 1024).toFixed(2);
+    const fileSize = file.size < 1024 * 1024
+        ? (file.size / 1024).toFixed(0) + ' KB'
+        : (file.size / 1024 / 1024).toFixed(2) + ' MB';
     
-    // Show file info
+    // Show file info row
     document.getElementById('fileName').textContent = file.name;
-    document.getElementById('fileSize').textContent = `${fileSize} MB`;
+    document.getElementById('fileSize').textContent = fileSize;
     document.getElementById('fileInfo').style.display = 'flex';
     document.getElementById('fileMessageArea').style.display = 'block';
+
+    // ---- Local preview ----
+    const previewEl = document.getElementById('localPreview');
+    previewEl.innerHTML = '';
+    const isImage = file.type.startsWith('image/');
+
+    if (isImage) {
+        // Show actual image thumbnail immediately from local file
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        img.alt = file.name;
+        img.onload = () => URL.revokeObjectURL(img.src); // free memory after load
+        previewEl.appendChild(img);
+    } else {
+        // PDF / Word / other — show a styled file-type card
+        const isPdf = file.name.toLowerCase().endsWith('.pdf');
+        const isDoc = file.name.toLowerCase().match(/\.(doc|docx)$/);
+        const iconColor = isPdf ? '#ef4444' : '#3b82f6';
+        const label = isPdf ? 'PDF Document' : isDoc ? 'Word Document' : 'Document';
+        previewEl.innerHTML = `
+            <div class="pdf-thumb">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                <span>${file.name}</span>
+                <small>${label} · ${fileSize}</small>
+            </div>`;
+    }
+    previewEl.style.display = 'flex';
+
     document.getElementById('processBtn').style.display = 'block';
 }
 
@@ -158,6 +199,8 @@ function clearFile() {
     document.getElementById('fileMessageArea').style.display = 'none';
     document.getElementById('fileMessage').value = '';
     document.getElementById('processBtn').style.display = 'none';
+    const previewEl = document.getElementById('localPreview');
+    if (previewEl) { previewEl.innerHTML = ''; previewEl.style.display = 'none'; }
 }
 
 async function processFile() {
@@ -209,6 +252,11 @@ async function processFile() {
             // Add assistant message with summary
             addMessage('assistant', `**${data.filename}** uploaded successfully!\n\n**Summary:**\n\n${data.summary}\n\nFeel free to ask me any questions about this material!`);
             updateChatTitle(data.filename, data.filename);
+
+            // Open the document viewer with the uploaded file
+            if (data.file_url) {
+                openDocViewer(data.file_url, data.file_type || 'pdf', data.filename);
+            }
         } else {
             addMessage('assistant', `Error: ${data.error}`);
         }
@@ -257,7 +305,10 @@ async function sendMessage() {
 
         if (response.ok) {
             const data = await response.json();
-            addMessage('assistant', data.response, data.message_id);
+            const replyText = data.response && data.response.trim()
+                ? data.response
+                : "Hey there! 👋 I'm LearnBuddy. What would you like to learn today?";
+            addMessage('assistant', replyText, data.message_id);
             // CRITICAL: persist the real DB session_id for conversation continuity
             if (data.session_id) {
                 currentSessionId = data.session_id;
@@ -625,6 +676,9 @@ function startNewChat() {
     document.getElementById('chatTitle').textContent = 'Welcome to LearnBuddy';
     document.getElementById('chatSubtitle').textContent = 'Upload materials and start learning';
 
+    // Close the document viewer when starting a fresh chat
+    closeDocViewer();
+
     // Close sidebar after starting a new chat
     document.querySelector('.sidebar').classList.remove('open');
 }
@@ -692,6 +746,13 @@ function loadChat(sessionId) {
                 const firstUserMessage = session.messages.find(m => m.type === 'user');
                 const titleContext = session.title || (firstUserMessage ? firstUserMessage.text : 'Chat');
                 updateChatTitle(titleContext, session.material);
+
+                // Re-open document viewer if the session has a material
+                if (session.material_url) {
+                    openDocViewer(session.material_url, session.material_type || 'pdf', session.material ? session.material.split('/').pop() : 'Document');
+                } else {
+                    closeDocViewer();
+                }
             }
         })
         .catch(error => {
@@ -805,6 +866,78 @@ document.addEventListener('click', (e) => {
         sidebar.classList.remove('open');
     }
 });
+
+// ========== DOCUMENT VIEWER ==========
+
+function openDocViewer(url, fileType, filename) {
+    currentMaterialUrl = url;
+    currentMaterialType = fileType;
+    currentMaterialName = filename;
+
+    const viewer = document.getElementById('docViewer');
+    const body = document.getElementById('docViewerBody');
+    const nameEl = document.getElementById('docViewerName');
+    const iconEl = document.getElementById('docViewerIcon');
+    const btn = document.getElementById('viewDocBtn');
+
+    const name = filename ? filename.split('/').pop() : 'Document';
+    if (nameEl) nameEl.textContent = name;
+
+    // Set icon based on type
+    const isImage = fileType === 'image';
+    if (iconEl) {
+        iconEl.innerHTML = isImage
+            ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`
+            : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+    }
+
+    // Build viewer content
+    body.innerHTML = '';
+    if (isImage) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = name;
+        body.appendChild(img);
+    } else {
+        // PDF / document — embed in iframe with browser's built-in viewer
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.title = name;
+        iframe.setAttribute('allowfullscreen', '');
+        body.appendChild(iframe);
+    }
+
+    viewer.classList.add('open');
+
+    if (btn) {
+        btn.style.display = 'flex';
+        btn.classList.add('active');
+    }
+}
+
+function closeDocViewer() {
+    const viewer = document.getElementById('docViewer');
+    const btn = document.getElementById('viewDocBtn');
+
+    viewer.classList.remove('open');
+
+    if (btn) {
+        btn.classList.remove('active');
+        // Only hide the button if there's no current material
+        if (!currentMaterialUrl) btn.style.display = 'none';
+    }
+}
+
+function toggleDocViewer() {
+    const viewer = document.getElementById('docViewer');
+    if (viewer.classList.contains('open')) {
+        closeDocViewer();
+    } else if (currentMaterialUrl) {
+        openDocViewer(currentMaterialUrl, currentMaterialType, currentMaterialName);
+    }
+}
+
+// ========== COOKIES ==========
 
 function getCookie(name) {
     let cookieValue = null;
