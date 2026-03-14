@@ -3,6 +3,7 @@ let currentFile = null;
 let chatSessions = [];
 let currentSessionId = null;
 let isLoading = false;
+let currentPreviewUrl = null;
 
 // ---- Document Viewer State ----
 let currentMaterialUrl = null;
@@ -24,10 +25,24 @@ function initializeEventListeners() {
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            if (currentFile) {
+                processFile({ messageSource: 'mainInput' });
+            } else {
+                sendMessage();
+            }
         }
     });
     messageInput.addEventListener('input', () => autoResizeTextarea(messageInput));
+    messageInput.addEventListener('paste', handleClipboardPaste);
+
+    const fileMessageInput = document.getElementById('fileMessage');
+    fileMessageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            processFile({ messageSource: 'fileInput' });
+        }
+    });
+    fileMessageInput.addEventListener('paste', handleClipboardPaste);
 
     // File upload
     const uploadArea = document.getElementById('uploadArea');
@@ -58,6 +73,7 @@ function initializeEventListeners() {
     });
 
     fileInput.addEventListener('change', handleFileUpload);
+    document.addEventListener('paste', handleClipboardPaste);
 
     // Action card click handlers
     const actionCards = document.querySelectorAll('.action-card');
@@ -82,6 +98,247 @@ function initializeEventListeners() {
             closeUploadPanel();
         }
     });
+}
+
+function isSupportedUploadFile(file) {
+    if (!file) return false;
+
+    const supportedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.docx', '.txt'];
+    const supportedMimePrefixes = ['image/'];
+    const supportedMimes = ['application/pdf', 'text/plain'];
+
+    const fileType = (file.type || '').toLowerCase();
+    if (supportedMimes.includes(fileType) || supportedMimePrefixes.some((prefix) => fileType.startsWith(prefix))) {
+        return true;
+    }
+
+    if (!file.name) return false;
+    const lowerName = file.name.toLowerCase();
+
+    return supportedExtensions.some((extension) => lowerName.endsWith(extension));
+}
+
+function extensionFromMimeType(mimeType) {
+    const type = (mimeType || '').toLowerCase();
+    if (type === 'image/png') return '.png';
+    if (type === 'image/jpeg' || type === 'image/jpg') return '.jpg';
+    if (type === 'image/webp') return '.webp';
+    if (type === 'image/gif') return '.gif';
+    if (type === 'image/bmp') return '.bmp';
+    if (type === 'application/pdf') return '.pdf';
+    if (type === 'text/plain') return '.txt';
+    return '';
+}
+
+function ensureNamedFile(file, fallbackPrefix = 'pasted-file') {
+    if (!file) return null;
+
+    const hasName = !!file.name;
+    const hasExtension = hasName && file.name.includes('.');
+    if (hasName && hasExtension) return file;
+
+    const extension = extensionFromMimeType(file.type);
+    const generatedName = `${fallbackPrefix}-${Date.now()}${extension}`;
+
+    try {
+        return new File([file], generatedName, {
+            type: file.type || 'application/octet-stream',
+            lastModified: Date.now(),
+        });
+    } catch (error) {
+        // Older browsers may not support File constructor.
+        file.name = generatedName;
+        return file;
+    }
+}
+
+function dataUrlToFile(dataUrl, fallbackPrefix = 'pasted-image') {
+    if (!dataUrl || !dataUrl.startsWith('data:')) return null;
+
+    const parts = dataUrl.split(',');
+    if (parts.length < 2) return null;
+
+    const meta = parts[0];
+    const base64Data = parts[1];
+    const mimeMatch = meta.match(/^data:([^;]+);base64$/i);
+    const mimeType = mimeMatch ? mimeMatch[1].toLowerCase() : 'image/png';
+
+    try {
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i += 1) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        const extension = extensionFromMimeType(mimeType) || '.png';
+        const fileName = `${fallbackPrefix}-${Date.now()}${extension}`;
+        return new File([bytes], fileName, { type: mimeType, lastModified: Date.now() });
+    } catch (error) {
+        console.error('Failed to convert pasted image data URL:', error);
+        return null;
+    }
+}
+
+function syncFileInput(file) {
+    const fileInput = document.getElementById('fileInput');
+    if (!fileInput || !file || typeof DataTransfer === 'undefined') return;
+
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    fileInput.files = dataTransfer.files;
+}
+
+function releasePreviewUrl() {
+    if (currentPreviewUrl) {
+        URL.revokeObjectURL(currentPreviewUrl);
+        currentPreviewUrl = null;
+    }
+}
+
+function setPendingFile(file, options = {}) {
+    if (!file || !isSupportedUploadFile(file)) {
+        addMessage('assistant', 'That file type is not supported yet. Use PDF, images, DOCX, or TXT.');
+        return;
+    }
+
+    const { openPanel = true } = options;
+    currentFile = file;
+    syncFileInput(file);
+
+    // Format file size
+    const fileSize = file.size < 1024 * 1024
+        ? (file.size / 1024).toFixed(0) + ' KB'
+        : (file.size / 1024 / 1024).toFixed(2) + ' MB';
+
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('fileSize').textContent = fileSize;
+    document.getElementById('fileInfo').style.display = 'flex';
+    document.getElementById('fileMessageArea').style.display = 'block';
+
+    const previewEl = document.getElementById('localPreview');
+    previewEl.innerHTML = '';
+    const isImage = file.type.startsWith('image/');
+
+    releasePreviewUrl();
+
+    if (isImage) {
+        const img = document.createElement('img');
+        currentPreviewUrl = URL.createObjectURL(file);
+        img.src = currentPreviewUrl;
+        img.alt = file.name;
+        previewEl.appendChild(img);
+    } else {
+        const isPdf = file.name.toLowerCase().endsWith('.pdf');
+        const isDoc = file.name.toLowerCase().match(/\.(docx|txt)$/);
+        const iconColor = isPdf ? '#ef4444' : '#3b82f6';
+        const label = isPdf ? 'PDF Document' : isDoc ? 'Document' : 'File';
+        previewEl.innerHTML = `
+            <div class="pdf-thumb">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                <span>${file.name}</span>
+                <small>${label} · ${fileSize}</small>
+            </div>`;
+    }
+
+    previewEl.style.display = 'flex';
+    document.getElementById('processBtn').style.display = 'block';
+
+    if (openPanel) {
+        showUploadPanel();
+    }
+}
+
+function getClipboardFile(clipboardData) {
+    if (!clipboardData) return null;
+
+    if (clipboardData.files && clipboardData.files.length > 0) {
+        const directFile = Array.from(clipboardData.files)
+            .map((file) => ensureNamedFile(file, 'clipboard-file'))
+            .find(isSupportedUploadFile);
+        if (directFile) return directFile;
+    }
+
+    if (!clipboardData.items) return null;
+
+    for (const item of clipboardData.items) {
+        if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (!file) continue;
+
+            const normalized = ensureNamedFile(file, 'pasted-file');
+            if (isSupportedUploadFile(normalized)) {
+                return normalized;
+            }
+        }
+
+        if (item.kind === 'string' && item.type === 'text/html') {
+            // Some apps place screenshots as HTML with data URLs.
+            // We cannot synchronously read getAsString, so skip here and use async fallback in handler.
+            continue;
+        }
+    }
+
+    return null;
+}
+
+async function getClipboardFileFromAsyncApi() {
+    if (!navigator.clipboard || !navigator.clipboard.read) return null;
+
+    try {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const clipboardItem of clipboardItems) {
+            for (const mimeType of clipboardItem.types) {
+                if (!mimeType.startsWith('image/') && mimeType !== 'application/pdf' && mimeType !== 'text/plain') {
+                    continue;
+                }
+
+                const blob = await clipboardItem.getType(mimeType);
+                const candidate = ensureNamedFile(blob, 'clipboard-api');
+                if (isSupportedUploadFile(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+    } catch (error) {
+        // Permission denied or browser policy; keep silent fallback behavior.
+        console.debug('Async clipboard API not available for file paste:', error);
+    }
+
+    return null;
+}
+
+function getHtmlDataImage(clipboardData) {
+    if (!clipboardData || !clipboardData.getData) return null;
+    const html = clipboardData.getData('text/html');
+    if (!html) return null;
+
+    const dataImageMatch = html.match(/src=["'](data:image\/[a-zA-Z0-9.+-]+;base64,[^"']+)["']/i);
+    if (!dataImageMatch) return null;
+
+    return dataUrlToFile(dataImageMatch[1], 'pasted-html-image');
+}
+
+async function handleClipboardPaste(e) {
+    let clipboardFile = getClipboardFile(e.clipboardData);
+
+    if (!clipboardFile) {
+        clipboardFile = getHtmlDataImage(e.clipboardData);
+    }
+
+    if (!clipboardFile) {
+        clipboardFile = await getClipboardFileFromAsyncApi();
+    }
+
+    if (!clipboardFile) return;
+
+    e.preventDefault();
+    setPendingFile(clipboardFile, { openPanel: true });
 }
 
 async function updateUserProfile() {
@@ -143,57 +400,12 @@ function handleFileUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
 
-    currentFile = file;
-    
-    // Format file size
-    const fileSize = file.size < 1024 * 1024
-        ? (file.size / 1024).toFixed(0) + ' KB'
-        : (file.size / 1024 / 1024).toFixed(2) + ' MB';
-    
-    // Show file info row
-    document.getElementById('fileName').textContent = file.name;
-    document.getElementById('fileSize').textContent = fileSize;
-    document.getElementById('fileInfo').style.display = 'flex';
-    document.getElementById('fileMessageArea').style.display = 'block';
-
-    // ---- Local preview ----
-    const previewEl = document.getElementById('localPreview');
-    previewEl.innerHTML = '';
-    const isImage = file.type.startsWith('image/');
-
-    if (isImage) {
-        // Show actual image thumbnail immediately from local file
-        const img = document.createElement('img');
-        img.src = URL.createObjectURL(file);
-        img.alt = file.name;
-        img.onload = () => URL.revokeObjectURL(img.src); // free memory after load
-        previewEl.appendChild(img);
-    } else {
-        // PDF / Word / other — show a styled file-type card
-        const isPdf = file.name.toLowerCase().endsWith('.pdf');
-        const isDoc = file.name.toLowerCase().match(/\.(doc|docx)$/);
-        const iconColor = isPdf ? '#ef4444' : '#3b82f6';
-        const label = isPdf ? 'PDF Document' : isDoc ? 'Word Document' : 'Document';
-        previewEl.innerHTML = `
-            <div class="pdf-thumb">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="1.5">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/>
-                    <line x1="16" y1="13" x2="8" y2="13"/>
-                    <line x1="16" y1="17" x2="8" y2="17"/>
-                    <polyline points="10 9 9 9 8 9"/>
-                </svg>
-                <span>${file.name}</span>
-                <small>${label} · ${fileSize}</small>
-            </div>`;
-    }
-    previewEl.style.display = 'flex';
-
-    document.getElementById('processBtn').style.display = 'block';
+    setPendingFile(file, { openPanel: false });
 }
 
 function clearFile() {
     currentFile = null;
+    releasePreviewUrl();
     document.getElementById('fileInput').value = '';
     document.getElementById('fileInfo').style.display = 'none';
     document.getElementById('fileMessageArea').style.display = 'none';
@@ -203,10 +415,15 @@ function clearFile() {
     if (previewEl) { previewEl.innerHTML = ''; previewEl.style.display = 'none'; }
 }
 
-async function processFile() {
-    if (!currentFile) return;
+async function processFile(options = {}) {
+    if (!currentFile || isLoading) return;
 
-    const userMessage = (document.getElementById('fileMessage')?.value || '').trim();
+    const { messageSource = 'fileInput' } = options;
+    const fileMessageInput = document.getElementById('fileMessage');
+    const mainMessageInput = document.getElementById('messageInput');
+    const userMessage = messageSource === 'mainInput'
+        ? (mainMessageInput?.value || '').trim()
+        : (fileMessageInput?.value || '').trim();
 
     const formData = new FormData();
     formData.append('file', currentFile);
@@ -222,12 +439,10 @@ async function processFile() {
     const welcomeSection = document.querySelector('.welcome-section');
     if (welcomeSection) welcomeSection.remove();
     const bubbleContent = userMessage
-        ? `Attached: **${currentFile.name}**\n\n${userMessage}`
-        : `Attached: **${currentFile.name}**`;
+        ? `Attached: ${currentFile.name}\n\n${userMessage}`
+        : `Attached: ${currentFile.name}`;
     addMessage('user', bubbleContent);
-
-    closeUploadPanel();
-    clearFile();
+    isLoading = true;
 
     try {
         showLoadingIndicator();
@@ -248,6 +463,15 @@ async function processFile() {
             if (data.session_id) {
                 currentSessionId = data.session_id;
             }
+
+            closeUploadPanel();
+            clearFile();
+            if (messageSource === 'mainInput' && mainMessageInput) {
+                mainMessageInput.value = '';
+                mainMessageInput.style.height = 'auto';
+            } else if (fileMessageInput) {
+                fileMessageInput.value = '';
+            }
             
             // Add assistant message with summary
             addMessage('assistant', `**${data.filename}** uploaded successfully!\n\n**Summary:**\n\n${data.summary}\n\nFeel free to ask me any questions about this material!`);
@@ -264,10 +488,16 @@ async function processFile() {
         removeLoadingIndicator();
         addMessage('assistant', 'Error uploading file. Please try again.');
         console.error('Error:', error);
+    } finally {
+        isLoading = false;
     }
 }
 
 async function sendMessage() {
+    if (currentFile) {
+        return processFile({ messageSource: 'mainInput' });
+    }
+
     const input = document.getElementById('messageInput');
     const message = input.value.trim();
 

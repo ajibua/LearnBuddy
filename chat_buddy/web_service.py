@@ -19,11 +19,12 @@ except ImportError:
 search_cache = {}
 CACHE_DURATION = 3600  # Cache for 1 hour
 
-def get_cached_search(query):
+def get_cached_search(query, max_age_seconds=None):
     """Get cached search results if they exist and are fresh"""
+    cache_duration = max_age_seconds if max_age_seconds is not None else CACHE_DURATION
     if query in search_cache:
         cached_time, cached_results = search_cache[query]
-        if datetime.now() - cached_time < timedelta(seconds=CACHE_DURATION):
+        if datetime.now() - cached_time < timedelta(seconds=cache_duration):
             return cached_results
     return None
 
@@ -282,6 +283,17 @@ def _query_is_book(q):
 def _query_is_sports(q):
     q = q.lower()
     return any(t in q for t in _SPORTS_TERMS)
+
+
+def _query_is_time_sensitive(q):
+    q = q.lower()
+    time_sensitive_terms = {
+        'now', 'today', 'current', 'latest', 'recent', 'breaking',
+        'happening', 'right now', 'this week', 'this month', 'update',
+        '2024', '2025', '2026', 'january', 'february', 'march', 'april',
+        'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'
+    }
+    return any(term in q for term in time_sensitive_terms)
 
 # ---------------------------------------------------------------------------
 # MusicBrainz  – free, no API key required, great for artists/albums
@@ -567,7 +579,7 @@ def search_google_news(query):
     if not FEEDPARSER_AVAILABLE:
         return None
     try:
-        cached = get_cached_search(f"gnews:{query}")
+        cached = get_cached_search(f"gnews:{query}", max_age_seconds=600)
         if cached:
             return cached
 
@@ -597,6 +609,61 @@ def search_google_news(query):
 
     except Exception as e:
         print(f"Google News RSS error: {e}")
+        return None
+
+
+def search_duckduckgo_web_results(query, max_results=5):
+    """
+    Scrape DuckDuckGo HTML results for live web snippets.
+    Returns up to max_results items with title, snippet, and url.
+    """
+    try:
+        cached = get_cached_search(f"ddg_html:{query}", max_age_seconds=900)
+        if cached:
+            return cached
+
+        headers = {
+            'User-Agent': 'LearnBuddy/1.0 (Educational AI Assistant; learnbuddy@example.com)'
+        }
+        response = requests.get(
+            'https://html.duckduckgo.com/html/',
+            params={'q': query},
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        parsed_results = []
+
+        for result in soup.select('.result'):
+            title_link = result.select_one('.result__title a, a.result__a')
+            snippet_node = result.select_one('.result__snippet')
+            if not title_link:
+                continue
+
+            title = title_link.get_text(' ', strip=True)
+            url = title_link.get('href', '').strip()
+            snippet = snippet_node.get_text(' ', strip=True) if snippet_node else ''
+
+            if title and url:
+                parsed_results.append({
+                    'title': title,
+                    'url': url,
+                    'snippet': snippet,
+                })
+
+            if len(parsed_results) >= max_results:
+                break
+
+        if parsed_results:
+            cache_search_results(f"ddg_html:{query}", parsed_results)
+            return parsed_results
+
+        return None
+
+    except Exception as e:
+        print(f"DuckDuckGo HTML search error: {e}")
         return None
 
 
@@ -716,7 +783,8 @@ def search_web(query, max_results=3):
       7. Open Library (books / authors – academic queries)
     """
     try:
-        cached = get_cached_search(f"web:{query}")
+        cache_age = 600 if _query_is_time_sensitive(query) else None
+        cached = get_cached_search(f"web:{query}", max_age_seconds=cache_age)
         if cached:
             return cached
 
@@ -731,6 +799,7 @@ def search_web(query, max_results=3):
             'sports': None,
             'reddit': None,
             'books': None,
+            'web_results': None,
             'timestamp': datetime.now().isoformat(),
         }
 
@@ -738,6 +807,7 @@ def search_web(query, max_results=3):
         is_news   = _query_is_news(query)
         is_book   = _query_is_book(query)
         is_sports = _query_is_sports(query)
+        is_time_sensitive = _query_is_time_sensitive(query)
 
         # 1 – Wikipedia (always)
         wiki_result = search_wikipedia(query)
@@ -768,6 +838,11 @@ def search_web(query, max_results=3):
             news = search_google_news(query)
             if news:
                 results['news'] = news
+
+        if is_time_sensitive or (not results['full_extract'] and not (results['ddg'] or {}).get('abstract')):
+            web_results = search_duckduckgo_web_results(query, max_results=max_results)
+            if web_results:
+                results['web_results'] = web_results
 
         # 5b – TheSportsDB (structured player/team data for sports queries)
         if is_sports:
@@ -893,6 +968,17 @@ def format_search_results_for_ai(search_results):
             formatted += f"  - {article['title']}{src}{pub}\n"
             if article.get('summary'):
                 formatted += f"    {article['summary']}\n"
+        has_content = True
+
+    web_results = search_results.get('web_results')
+    if web_results:
+        formatted += "\n**Recent Web Results:**\n"
+        for result in web_results[:5]:
+            formatted += f"  - {result['title']}\n"
+            if result.get('snippet'):
+                formatted += f"    {result['snippet']}\n"
+            if result.get('url'):
+                formatted += f"    Source: {result['url']}\n"
         has_content = True
 
     # ---- Open Library books ----

@@ -579,16 +579,12 @@ class FileUploadView(APIView):
             # Determine file type
             if filename.endswith('.pdf'):
                 file_type = 'pdf'
-            elif filename.endswith(('.jpg', '.jpeg')):
+            elif filename.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')):
                 file_type = 'image'
-            elif filename.endswith('.png'):
-                file_type = 'image'
-            elif filename.endswith('.gif'):
-                file_type = 'image'
-            elif filename.endswith(('.doc', '.docx')):
+            elif filename.endswith(('.docx', '.txt')):
                 file_type = 'document'
             else:
-                return Response({'error': 'File type not supported. Please use PDF, images (JPG, JPEG, PNG, GIF), or documents (DOC, DOCX)'}, 
+                return Response({'error': 'File type not supported. Please use PDF, images (JPG, PNG, GIF, BMP, WebP), DOCX, or TXT.'}, 
                               status=status.HTTP_400_BAD_REQUEST)
             
             # Save file temporarily and process

@@ -49,9 +49,7 @@ if not google_api_key:
 genai.configure(api_key=google_api_key)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# ---------------------------------------------------------------------------
-# SymPy math engine (symbolic algebra, calculus, ODEs, linear algebra)
-# ---------------------------------------------------------------------------
+
 try:
     import sympy as sp
     SYMPY_AVAILABLE = True
@@ -59,9 +57,6 @@ except ImportError:
     SYMPY_AVAILABLE = False
     print("Warning: SymPy not installed. pip install sympy to enable verified math solving.")
 
-# ---------------------------------------------------------------------------
-# SciPy + NumPy engine (physics, engineering, numerical computing)
-# ---------------------------------------------------------------------------
 try:
     import scipy
     import scipy.optimize
@@ -75,9 +70,7 @@ except ImportError:
     SCIPY_AVAILABLE = False
     print("Warning: SciPy/NumPy not installed. pip install scipy numpy to enable physics/engineering solving.")
 
-# ---------------------------------------------------------------------------
-# Pint engine (unit-aware physics/engineering calculations)
-# ---------------------------------------------------------------------------
+
 try:
     import pint
     _ureg = pint.UnitRegistry()
@@ -86,9 +79,6 @@ except ImportError:
     PINT_AVAILABLE = False
     print("Warning: Pint not installed. pip install pint to enable unit-aware calculations.")
 
-# ---------------------------------------------------------------------------
-# ChemPy engine (chemistry: stoichiometry, equilibrium, thermochemistry)
-# ---------------------------------------------------------------------------
 try:
     import chempy
     CHEMPY_AVAILABLE = True
@@ -115,9 +105,7 @@ def is_math_computation_problem(message: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
-# Physics / Engineering field detection
-# ---------------------------------------------------------------------------
+
 _PHYSICS_ENGINEERING_KEYWORDS = {
     # Mechanics
     'velocity', 'acceleration', 'force', 'momentum', 'impulse', 'torque', 'angular',
@@ -155,9 +143,7 @@ def is_physics_engineering_problem(message: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
-# Chemistry field detection
-# ---------------------------------------------------------------------------
+
 _CHEMISTRY_KEYWORDS = {
     'mole', 'molar', 'molarity', 'molality', 'concentration',
     'stoichiometry', 'stoichiometric',
@@ -180,9 +166,16 @@ def is_chemistry_problem(message: str) -> bool:
     lower = message.lower()
     if any(kw in lower for kw in _CHEMISTRY_KEYWORDS):
         return True
-    # Chemical formula: H2O, CO2, NaCl, H2SO4, C6H12O6
-    if re.search(r'\b[A-Z][a-z]?\d*(?:[A-Z][a-z]?\d*){1,}\b', message):
-        return True
+
+    # Chemical formula heuristic: avoid matching simple acronyms like "AI" or "USA".
+    formula_match = re.search(r'\b(?:[A-Z][a-z]?\d*){2,}\b', message)
+    if formula_match:
+        token = formula_match.group(0)
+        has_digit = any(ch.isdigit() for ch in token)
+        has_lower = any(ch.islower() for ch in token)
+        if has_digit or has_lower:
+            return True
+
     return False
 
 
@@ -336,17 +329,46 @@ def solve_chemistry(problem_description: str):
 
 
 _SCANNER_WATERMARKS = [
-    'camscanner', 'adobe scan', 'microsoft lens', 'genius scan',
+    'camscanner', 'adobe scan', 'microsoft lens', 'genius scan', 'anyscanner',
     'tiny scanner', 'turbo scan', 'scanbot', 'docscanner',
     'scan with', 'scanned by', 'scanned with',
 ]
+
+
+def _strip_scanner_watermark_noise(text: str) -> str:
+    """Remove common scanner watermark lines from OCR output."""
+    if not text:
+        return ""
+
+    cleaned_lines = []
+    for line in text.splitlines():
+        compact = re.sub(r'\s+', ' ', line).strip()
+        if not compact:
+            cleaned_lines.append(line)
+            continue
+
+        lowered = compact.lower()
+        lowered_no_space = re.sub(r'\s+', '', lowered)
+
+        # Drop obvious scanner watermark lines and scanner-related promo links.
+        if any(wm.replace(' ', '') in lowered_no_space for wm in _SCANNER_WATERMARKS):
+            continue
+        if 'scanner' in lowered and ('http' in lowered or '.com' in lowered or 'www.' in lowered):
+            continue
+
+        cleaned_lines.append(line)
+
+    cleaned_text = "\n".join(cleaned_lines)
+    # Collapse excessive blank lines after removing watermark rows.
+    cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text).strip()
+    return cleaned_text
 
 def _is_meaningful_text(text: str, min_chars: int = 120) -> bool:
     """
     Return True only if the extracted text contains substantial real content
     after removing known scanner watermark noise.
     """
-    cleaned = text.lower()
+    cleaned = _strip_scanner_watermark_noise(text).lower()
     for watermark in _SCANNER_WATERMARKS:
         cleaned = cleaned.replace(watermark, '')
     # Strip whitespace, punctuation and digits that were part of watermarks
@@ -391,17 +413,17 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
     """
     Extract text from image-based PDFs (including scanned / handwritten pages)
     using Gemini's vision API.
-    Speed optimisations:
-    - 200 DPI (sharp enough for Gemini, ~44% smaller than 300 DPI)
+    Speed/quality balance:
+    - 260 DPI default for better small-text recovery on blurry scans
     - Images resized to max 1 600 px wide before encoding
     - JPEG encoding (5-10× smaller than PNG)
     - All pages processed IN PARALLEL via ThreadPoolExecutor
     Quality:
-    - PIL contrast + sharpness enhancement before sending
+    - Adaptive preprocessing with conditional retry variants for dark/low-contrast pages
     - Gemini prompt explicitly ignores scanner watermarks (CamScanner, etc.)
     """
     import base64
-    from PIL import ImageEnhance
+    from PIL import ImageEnhance, ImageOps, ImageFilter
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     poppler_path = r'C:\Users\HomePC\Downloads\poppler\poppler-25.12.0\Library\bin'
@@ -411,13 +433,13 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
             if os.path.exists(poppler_path):
                 images = convert_from_path(
                     pdf_path, first_page=1, last_page=20,
-                    dpi=200, poppler_path=poppler_path
+                    dpi=260, poppler_path=poppler_path
                 )
             else:
-                images = convert_from_path(pdf_path, first_page=1, last_page=20, dpi=200)
+                images = convert_from_path(pdf_path, first_page=1, last_page=20, dpi=260)
         except Exception as e:
             print(f"Poppler path failed, trying system poppler: {e}")
-            images = convert_from_path(pdf_path, first_page=1, last_page=20, dpi=200)
+            images = convert_from_path(pdf_path, first_page=1, last_page=20, dpi=260)
 
     except Exception as e:
         raise Exception(f"Failed to convert PDF pages to images: {str(e)}")
@@ -430,7 +452,7 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
         "IMPORTANT RULES:\n"
         "1. IGNORE all scanner / app watermarks, logos, and branding. "
         "This includes 'CamScanner', 'Adobe Scan', 'Microsoft Lens', "
-        "'Genius Scan', any app name, website URL, or promotional text "
+        "'Genius Scan', 'AnyScanner', any app name, website URL, or promotional text "
         "added by a scanning app — do NOT transcribe these.\n"
         "2. If the page contains handwriting, transcribe it faithfully, "
         "preserving line breaks, numbering, and structure.\n"
@@ -441,28 +463,70 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
         "5. Return ONLY the transcribed text — no commentary or explanations."
     )
 
-    def process_page(args):
-        """Preprocess one page image and call Gemini. Returns (idx, text)."""
-        idx, img = args
+    def _text_quality_score(text: str) -> int:
+        """Heuristic score to decide whether OCR output is usable."""
+        if not text:
+            return 0
+
+        cleaned = text.strip()
+        if not cleaned:
+            return 0
+
+        alnum_chars = sum(1 for c in cleaned if c.isalnum())
+        total_chars = len(cleaned)
+        words = [w for w in re.split(r'\s+', cleaned) if w]
+        long_words = sum(1 for w in words if len(w) >= 3)
+        line_count = len([line for line in cleaned.splitlines() if line.strip()])
+
+        # Cap each component to avoid over-biasing extra-long pages.
+        score = 0
+        score += min(total_chars, 1200) // 8
+        score += min(alnum_chars, 1000) // 10
+        score += min(long_words, 200)
+        score += min(line_count, 60) * 2
+        return score
+
+    def _build_preprocessed_variants(page_img):
+        """Generate ordered image variants for robust OCR on difficult scans."""
+        variants = []
+
+        # Variant 1: balanced enhancement (default for most pages)
+        v1 = page_img.convert('RGB')
+        v1 = ImageEnhance.Contrast(v1).enhance(1.9)
+        v1 = ImageEnhance.Sharpness(v1).enhance(2.2)
+        v1 = ImageEnhance.Brightness(v1).enhance(1.08)
+        variants.append(v1)
+
+        # Variant 2: dark-page rescue (strong brighten + autocontrast)
+        v2 = page_img.convert('L')
+        v2 = ImageOps.autocontrast(v2, cutoff=1)
+        v2 = ImageEnhance.Brightness(v2).enhance(1.35)
+        v2 = ImageEnhance.Contrast(v2).enhance(2.0)
+        v2 = v2.filter(ImageFilter.UnsharpMask(radius=1.8, percent=170, threshold=2))
+        variants.append(v2.convert('RGB'))
+
+        # Variant 3: noisy/low-contrast rescue (denoise + threshold)
+        v3 = page_img.convert('L').filter(ImageFilter.MedianFilter(size=3))
+        v3 = ImageOps.autocontrast(v3, cutoff=2)
+        v3 = v3.point(lambda p: 255 if p > 150 else 0)
+        variants.append(v3.convert('RGB'))
+
+        return variants
+
+    def _extract_with_gemini(prepared_img):
+        """Encode one preprocessed image and ask Gemini for transcription."""
         tmp_path = None
         try:
-            # Preprocess
-            img = img.convert('RGB')
-            img = ImageEnhance.Contrast(img).enhance(1.8)
-            img = ImageEnhance.Sharpness(img).enhance(2.0)
-
-            # Resize to max 1600px wide to reduce payload size
             max_width = 1600
-            if img.width > max_width:
-                ratio = max_width / img.width
-                img = img.resize(
-                    (max_width, int(img.height * ratio)),
+            if prepared_img.width > max_width:
+                ratio = max_width / prepared_img.width
+                prepared_img = prepared_img.resize(
+                    (max_width, int(prepared_img.height * ratio)),
                     resample=Image.LANCZOS
                 )
 
-            # Save as JPEG (much smaller than PNG)
             with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
-                img.save(tmp, format='JPEG', quality=90, optimize=True)
+                prepared_img.save(tmp, format='JPEG', quality=92, optimize=True)
                 tmp_path = tmp.name
 
             with open(tmp_path, 'rb') as f:
@@ -472,16 +536,40 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
                 PAGE_PROMPT,
                 {"mime_type": "image/jpeg", "data": img_data}
             ])
+            return response.text.strip() if response and response.text else ""
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
-            page_text = response.text.strip() if response.text else ""
-            return (idx, page_text)
+    def process_page(args):
+        """Preprocess one page image and call Gemini. Returns (idx, text)."""
+        idx, img = args
+        try:
+            variants = _build_preprocessed_variants(img)
+
+            # Always try the balanced variant first.
+            best_text = _extract_with_gemini(variants[0])
+            best_score = _text_quality_score(best_text)
+
+            # Retry difficult pages only (blurry/dark/low-contrast outputs).
+            if best_score < 65:
+                for variant in variants[1:]:
+                    candidate_text = _extract_with_gemini(variant)
+                    candidate_score = _text_quality_score(candidate_text)
+                    if candidate_score > best_score:
+                        best_text = candidate_text
+                        best_score = candidate_score
+
+                    # Stop early when extraction is clearly strong enough.
+                    if best_score >= 120:
+                        break
+
+            best_text = _strip_scanner_watermark_noise(best_text)
+            return (idx, best_text)
 
         except Exception as e:
             print(f"Error processing page {idx + 1} with Gemini: {e}")
             return (idx, "")
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
 
     # Process all pages IN PARALLEL (up to 5 concurrent Gemini calls)
     results = {}
@@ -495,6 +583,7 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
 
     # Reassemble in original page order
     full_text = "\n\n".join(results[i] for i in sorted(results))
+    full_text = _strip_scanner_watermark_noise(full_text)
     return full_text if full_text.strip() else "No readable text found in this PDF."
 
 
@@ -537,6 +626,7 @@ def extract_text_from_image(image_path):
                 "IMPORTANT RULES:\n"
                 "1. IGNORE all scanner / app watermarks, logos, and branding. "
                 "This includes 'CamScanner', 'Adobe Scan', 'Microsoft Lens', "
+                "'AnyScanner', "
                 "any app name, website URL, or promotional overlay added by a scanning app.\n"
                 "2. Transcribe handwriting faithfully, preserving the original line breaks and structure.\n"
                 "3. If text is partially illegible, give your best reading and mark uncertain words with [?].\n"
@@ -550,7 +640,7 @@ def extract_text_from_image(image_path):
         ])
         
         if response.text.strip():
-            return response.text
+            return _strip_scanner_watermark_noise(response.text)
         else:
             return "No readable text found in this image."
             
@@ -594,6 +684,20 @@ def extract_text_from_word(doc_path):
         return text
     except Exception as e:
         return f"Failed to extract text from Word document: {str(e)}"
+
+
+def extract_text_from_plain_text(text_path):
+    """Extract text from a plain-text file."""
+    try:
+        with open(text_path, 'r', encoding='utf-8') as text_file:
+            content = text_file.read()
+        return content if content.strip() else "No readable text found in this text document."
+    except UnicodeDecodeError:
+        with open(text_path, 'r', encoding='latin-1') as text_file:
+            content = text_file.read()
+        return content if content.strip() else "No readable text found in this text document."
+    except Exception as e:
+        return f"Failed to extract text from text document: {str(e)}"
 
 
 def summarize_pdf(pdf_path, user_instruction=None):
@@ -705,10 +809,13 @@ Format in a friendly, helpful tone. Be clear and precise in your explanation."""
 
 def summarize_document(doc_path, user_instruction=None):
     """
-    Extract and summarize text from Word documents (.docx) with structured formatting
+    Extract and summarize text from document files with structured formatting
     """
     try:
-        doc_text = extract_text_from_word(doc_path)
+        if doc_path.lower().endswith('.txt'):
+            doc_text = extract_text_from_plain_text(doc_path)
+        else:
+            doc_text = extract_text_from_word(doc_path)
         
         if not doc_text.strip() or "Failed to extract" in doc_text:
             return doc_text if doc_text else "Unable to extract text from this document."
@@ -812,8 +919,9 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
             try:
                 # Try to get reference information (Wikipedia for general knowledge)
                 search_results = search_web(user_message, max_results=3)
-                if search_results and search_results.get('knowledge'):
-                    current_event_info = format_search_results_for_ai(search_results)
+                formatted_search_results = format_search_results_for_ai(search_results)
+                if formatted_search_results:
+                    current_event_info = formatted_search_results
                     print(f"Found reference information for: {user_message}")
             except Exception as e:
                 # Don't break the chat if search fails - just continue without it
