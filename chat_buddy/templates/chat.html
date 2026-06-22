@@ -5,11 +5,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>LearnBuddy - Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/chat-new.css' %}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            if (savedTheme === 'light') {
+                document.documentElement.classList.add('light-mode');
+            }
+        })();
+    </script>
 </head>
 <body>
     <div class="chat-wrapper">
@@ -21,13 +32,36 @@
                 </div>
             </div>
 
-            <div class="sidebar-nav">
+            <div class="sidebar-nav" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="{% url 'dashboard' %}" class="nav-btn" style="background: rgba(255, 255, 255, 0.05); color: var(--text-primary); border: 1px solid var(--border); text-decoration: none;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="9"/>
+                        <rect x="14" y="3" width="7" height="5"/>
+                        <rect x="14" y="12" width="7" height="9"/>
+                        <rect x="3" y="16" width="7" height="5"/>
+                    </svg>
+                    <span>Dashboard</span>
+                </a>
                 <button class="nav-btn new-chat-btn" onclick="startNewChat()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 5v14M5 12h14"/>
                     </svg>
                     <span>New Chat</span>
                 </button>
+                <a href="{% url 'flashcards' %}" class="nav-btn" style="background: rgba(255, 255, 255, 0.05); color: var(--text-primary); border: 1px solid var(--border); text-decoration: none;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="9" y1="3" x2="9" y2="21"/>
+                    </svg>
+                    <span>Flashcards</span>
+                </a>
+                <a href="{% url 'quizzes' %}" class="nav-btn" style="background: rgba(255, 255, 255, 0.05); color: var(--text-primary); border: 1px solid var(--border); text-decoration: none;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 11l3 3L22 4"/>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                    <span>Quizzes</span>
+                </a>
             </div>
 
             <div class="chat-list">
@@ -77,7 +111,6 @@
                 </button>
             </div>
             <div class="doc-viewer-body" id="docViewerBody">
-                <!-- PDF iframe or image injected by JS -->
             </div>
         </div>
 
@@ -86,21 +119,39 @@
             <!-- Chat Header -->
             <header class="chat-header">
                 <div class="header-content">
-                    <h1 id="chatTitle">Welcome to LearnBuddy</h1>
-                    <p id="chatSubtitle" class="subtitle">Upload materials and start learning</p>
+                    <h1 id="chatTitle">Welcome to LearnBuddy AI assistant.</h1>
+                    <p id="chatSubtitle" class="subtitle">Upload materials and hit the ground running!!</p>
                 </div>
-                <button class="view-doc-btn" id="viewDocBtn" onclick="toggleDocViewer()" style="display:none" title="Toggle document viewer">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                    </svg>
-                    <span>View Doc</span>
-                </button>
-                <button class="menu-toggle" onclick="toggleSidebar()">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M4 6h16M4 12h16M4 18h16"/>
-                    </svg>
-                </button>
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <button id="themeToggleBtn" class="theme-toggle-btn" aria-label="Toggle Theme" style="background: none; border: none; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; justify-content: center; padding: 0.5rem; border-radius: 8px; transition: var(--transition);">
+                        <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"></circle>
+                            <line x1="12" y1="1" x2="12" y2="3"></line>
+                            <line x1="12" y1="21" x2="12" y2="23"></line>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                            <line x1="1" y1="12" x2="3" y2="12"></line>
+                            <line x1="21" y1="12" x2="23" y2="12"></line>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                        </svg>
+                        <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                        </svg>
+                    </button>
+                    <button class="view-doc-btn" id="viewDocBtn" onclick="toggleDocViewer()" style="display:none" title="Toggle document viewer">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <span>View Doc</span>
+                    </button>
+                    <button class="menu-toggle" onclick="toggleSidebar()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 6h16M4 12h16M4 18h16"/>
+                        </svg>
+                    </button>
+                </div>
             </header>
 
             <!-- Messages Container -->
@@ -135,7 +186,6 @@
                     </div>
                 </div>
 
-                <!-- Messages will be rendered here -->
                 <div id="messagesList"></div>
             </div>
 
@@ -199,6 +249,85 @@
         </main>
     </div>
 
+    <script src="{% static 'js/theme.js' %}"></script>
     <script src="{% static 'js/chat-new.js' %}"></script>
+    <script>
+        (function() {
+            let currentMaterialId = null;
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('material')) {
+                currentMaterialId = urlParams.get('material');
+            }
+            const originalFetch = window.fetch;
+            window.fetch = async function(...args) {
+                const res = await originalFetch(...args);
+                const url = args[0];
+                if (typeof url === 'string' && url.includes('/api/chat-history/')) {
+                    const clone = res.clone();
+                    try {
+                        const data = await clone.json();
+                        if (data.sessions && window.currentSessionId) {
+                            const sess = data.sessions.find(s => s.session_id === window.currentSessionId);
+                            if (sess && sess.material_id) {
+                                currentMaterialId = sess.material_id;
+                            } else if (sess) {
+                                currentMaterialId = null;
+                            }
+                        }
+                    } catch(e) {}
+                } else if (typeof url === 'string' && url.includes('/api/upload/')) {
+                    const clone = res.clone();
+                    try {
+                        const data = await clone.json();
+                        if (data.id) {
+                            currentMaterialId = data.id;
+                        }
+                    } catch(e) {}
+                }
+                return res;
+            };
+            setInterval(() => {
+                if (window.chatSessions && window.currentSessionId) {
+                    const sess = window.chatSessions.find(s => s.session_id === window.currentSessionId);
+                    if (sess && sess.material_id) {
+                        currentMaterialId = sess.material_id;
+                    }
+                }
+            }, 5000);
+            function sendHeartbeat() {
+                if (document.hidden) return;
+                const payload = {
+                    activity_type: 'chat',
+                    duration_seconds: 30
+                };
+                if (currentMaterialId) {
+                    payload.study_material_id = currentMaterialId;
+                }
+                originalFetch('/api/analytics/track/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify(payload)
+                }).catch(e => console.debug('Heartbeat ping failed'));
+            }
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            }
+            setInterval(sendHeartbeat, 30000);
+        })();
+    </script>
 </body>
 </html>

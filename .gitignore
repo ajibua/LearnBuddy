@@ -8,7 +8,11 @@
 # Dependency folders
 node_modules/
 
+venv/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+media/

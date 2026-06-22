@@ -12,9 +12,8 @@ let currentMaterialName = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    document.body.classList.add('light-mode');  // always use light mode
     initializeEventListeners();
-    updateUserProfile();        // fetch and update current user profile
+    updateUserProfile();
     loadChatHistory();
     checkInitialMessage();
 });
@@ -475,7 +474,12 @@ async function processFile(options = {}) {
             
             // Add assistant message with summary
             addMessage('assistant', `**${data.filename}** uploaded successfully!\n\n**Summary:**\n\n${data.summary}\n\nFeel free to ask me any questions about this material!`);
-            updateChatTitle(data.filename, data.filename);
+            if (data.session_title) {
+                updateChatTitle(data.session_title);
+                updateSidebarTitle(data.session_id, data.session_title);
+            } else {
+                updateChatTitle(data.filename, data.filename);
+            }
 
             // Open the document viewer with the uploaded file
             if (data.file_url) {
@@ -923,9 +927,9 @@ function loadChatHistory() {
                     // Prefer AI-generated title, fall back to first user message
                     const firstMessage = session.messages.find(m => m.type === 'user');
                     const preview = firstMessage ? firstMessage.text.substring(0, 30) + (firstMessage.text.length > 30 ? '...' : '') : 'Chat';
-                    const title = session.material
+                    const title = session.title || (session.material
                         ? session.material.split('/').pop()
-                        : (session.title || preview);
+                        : preview);
                     
                     const item = document.createElement('div');
                     item.className = 'chat-item';
@@ -975,7 +979,7 @@ function loadChat(sessionId) {
                 // Update title with stored title, material name, or first user message
                 const firstUserMessage = session.messages.find(m => m.type === 'user');
                 const titleContext = session.title || (firstUserMessage ? firstUserMessage.text : 'Chat');
-                updateChatTitle(titleContext, session.material);
+                updateChatTitle(titleContext, session.title ? null : session.material);
 
                 // Re-open document viewer if the session has a material
                 if (session.material_url) {

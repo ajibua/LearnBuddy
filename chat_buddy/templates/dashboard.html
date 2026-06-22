@@ -1,0 +1,311 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LearnBuddy - Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/chat-new.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboard-apps.css' %}">
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            if (savedTheme === 'light') {
+                document.documentElement.classList.add('light-mode');
+            }
+        })();
+    </script>
+</head>
+<body class="scrollable-body">
+    <header class="main-header">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <a href="{% url 'dashboard' %}" class="logo" style="text-decoration: none; font-size: 1.4rem;">
+                <span>LearnBuddy</span>
+            </a>
+            <nav style="display: flex; gap: 1.5rem; align-items: center;">
+                <a href="{% url 'dashboard' %}" class="action-link" style="color: var(--primary); font-weight: 700;">Dashboard</a>
+                <a href="{% url 'chat' %}" class="action-link" style="color: var(--text-secondary);">AI Chat</a>
+                <a href="{% url 'flashcards' %}" class="action-link" style="color: var(--text-secondary);">Flashcards</a>
+                <a href="{% url 'quizzes' %}" class="action-link" style="color: var(--text-secondary);">Quizzes</a>
+            </nav>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <button id="themeToggleBtn" class="theme-toggle-btn" aria-label="Toggle Theme" style="background: none; border: none; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; justify-content: center; padding: 0.5rem; border-radius: 8px; transition: var(--transition);">
+                    <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">{{ user.first_name|default:user.username }}</span>
+                <a href="{% url 'logout' %}" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; border-radius: 8px;">Sign Out</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="dashboard-wrapper">
+        <div class="welcome-banner">
+            <div class="welcome-text">
+                <h1>Welcome back, {{ user.first_name|default:user.username }}!</h1>
+                <p>Your ultimate study partner is ready. What are we mastering today?</p>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+                <a href="{% url 'chat' %}" class="btn btn-primary">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <span>Start Studying</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Study Materials</h3>
+                    <p>{{ materials_count }}</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--success);">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                    </svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Chat Sessions</h3>
+                    <p>{{ sessions_count }}</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: rgba(168, 85, 247, 0.1); color: #a855f7;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Flashcard Decks</h3>
+                    <p>{{ decks_count }}</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                </div>
+                <div class="stat-info">
+                    <h3>Quizzes Completed</h3>
+                    <p>{{ quizzes_count }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="actions-header" style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
+            <h2>Study Analytics</h2>
+        </div>
+
+        <div class="analytics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 3rem;">
+            <div class="stat-card" style="flex-direction: column; align-items: stretch; gap: 1.5rem; padding: 2rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); text-transform: none; letter-spacing: normal;">Weekly Study Trend</h3>
+                    <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 600;">Total: {{ total_study_minutes }}m</span>
+                </div>
+                <div style="display: flex; align-items: flex-end; justify-content: space-between; height: 180px; padding: 0.5rem 0; border-bottom: 1px solid var(--border); position: relative;">
+                    {% for item in weekly_trend %}
+                        <div style="display: flex; flex-direction: column; align-items: center; flex: 1; height: 100%; justify-content: flex-end; cursor: pointer; position: relative;">
+                            <div class="chart-tooltip" style="position: absolute; bottom: calc({{ item.percent }}% + 10px); background: var(--bg-tertiary); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.75rem; font-weight: 600; border: 1px solid var(--border); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 10;">
+                                {{ item.minutes }}m
+                            </div>
+                            <div style="width: 24px; height: {{ item.percent }}%; background: linear-gradient(180deg, var(--primary) 0%, rgba(59, 130, 246, 0.4) 100%); border-radius: 6px 6px 0 0; transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1); min-height: 4px;" onmouseover="this.previousElementSibling.style.opacity='1'" onmouseout="this.previousElementSibling.style.opacity='0'"></div>
+                            <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.5rem; font-weight: 600;">{{ item.day }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="stat-card" style="flex-direction: column; align-items: stretch; gap: 1.5rem; padding: 2rem;">
+                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); text-transform: none; letter-spacing: normal; margin-bottom: 0.5rem;">Activity Breakdown</h3>
+                <div style="display: flex; height: 20px; border-radius: 10px; overflow: hidden; background: var(--bg-tertiary); width: 100%; border: 1px solid var(--border);">
+                    {% if chat_percent or flashcards_percent or quiz_percent %}
+                        <div style="width: {{ chat_percent }}%; background: #3b82f6; transition: width 0.5s ease;" title="AI Chat: {{ chat_minutes }}m ({{ chat_percent }}%)"></div>
+                        <div style="width: {{ flashcards_percent }}%; background: #a855f7; transition: width 0.5s ease;" title="Flashcards: {{ flashcards_minutes }}m ({{ flashcards_percent }}%)"></div>
+                        <div style="width: {{ quiz_percent }}%; background: #f59e0b; transition: width 0.5s ease;" title="Quizzes: {{ quiz_minutes }}m ({{ quiz_percent }}%)"></div>
+                    {% else %}
+                        <div style="width: 100%; background: var(--bg-tertiary); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 0.8rem;">No study history yet</div>
+                    {% endif %}
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 12px; height: 12px; border-radius: 3px; background: #3b82f6;"></div>
+                            <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">AI Study Assistant</span>
+                        </div>
+                        <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 600;">{{ chat_minutes }}m ({{ chat_percent }}%)</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 12px; height: 12px; border-radius: 3px; background: #a855f7;"></div>
+                            <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">Interactive Flashcards</span>
+                        </div>
+                        <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 600;">{{ flashcards_minutes }}m ({{ flashcards_percent }}%)</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 12px; height: 12px; border-radius: 3px; background: #f59e0b;"></div>
+                            <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">AI Quizzes</span>
+                        </div>
+                        <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 600;">{{ quiz_minutes }}m ({{ quiz_percent }}%)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="actions-header">
+            <h2>Explore Features</h2>
+        </div>
+
+        <div class="app-grid">
+            <a href="{% url 'chat' %}" class="app-card">
+                <div class="app-card-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                </div>
+                <h3>AI Study Assistant</h3>
+                <p>Chat with your smart assistant. Upload worksheets, PDFs, or photos of assignments to get explanations and step-by-step solutions.</p>
+                <div class="app-card-footer">
+                    <span>Open Workspace</span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                </div>
+            </a>
+
+            <a href="{% url 'flashcards' %}" class="app-card">
+                <div class="app-card-icon" style="background: rgba(168, 85, 247, 0.12); color: #a855f7;">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="9" y1="3" x2="9" y2="21"/>
+                    </svg>
+                </div>
+                <h3>AI Flashcard Decks</h3>
+                <p>Generate smart learning card decks from your documents instantly. Flip, review, and test your memory with beautiful 3D animations.</p>
+                <div class="app-card-footer" style="color: #a855f7;">
+                    <span>Open Decks</span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                </div>
+            </a>
+
+            <a href="{% url 'quizzes' %}" class="app-card">
+                <div class="app-card-icon" style="background: rgba(245, 158, 11, 0.12); color: #f59e0b;">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 11l3 3L22 4"/>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                </div>
+                <h3>AI Quiz Generator</h3>
+                <p>Test your knowledge with multiple-choice quizzes created dynamically from your uploaded materials. Get instant grading and detailed feedback.</p>
+                <div class="app-card-footer" style="color: #f59e0b;">
+                    <span>Start Quizzer</span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                </div>
+            </a>
+        </div>
+
+        <div class="recent-section">
+            <div class="recent-box">
+                <h2>
+                    <span>Recent Study Materials</span>
+                    <a href="{% url 'chat' %}" class="action-link" style="font-size: 0.8rem;">Upload More</a>
+                </h2>
+                <div class="materials-list">
+                    {% for mat in recent_materials %}
+                        <div class="material-item">
+                            <div class="item-main">
+                                <div class="item-icon {{ mat.file_type }}">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                        <polyline points="14 2 14 8 20 8"/>
+                                    </svg>
+                                </div>
+                                <div class="item-info">
+                                    <h4>{{ mat.file.name|slice:"10:"|default:mat.file.name }}</h4>
+                                    <p>Uploaded on {{ mat.uploaded_at|date:"M d, Y" }}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 1rem;">
+                                <a href="{% url 'chat' %}?material={{ mat.id }}" class="action-link">Chat</a>
+                            </div>
+                        </div>
+                    {% empty %}
+                        <div class="empty-state">
+                            <p>No study materials uploaded yet. Upload your first PDF, image, or doc in the Chat section!</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="recent-box">
+                <h2>
+                    <span>Recent Chats</span>
+                    <a href="{% url 'chat' %}" class="action-link" style="font-size: 0.8rem;">New Chat</a>
+                </h2>
+                <div class="sessions-list">
+                    {% for session in recent_sessions %}
+                        <a href="{% url 'chat' %}?session={{ session.id }}" class="session-item" style="text-decoration: none; color: inherit;">
+                            <div class="item-main">
+                                <div class="item-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                                    </svg>
+                                </div>
+                                <div class="item-info">
+                                    <h4>{{ session.title|default:"Untitled Chat" }}</h4>
+                                    <p>{{ session.created_at|date:"M d, g:i A" }}</p>
+                                </div>
+                            </div>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-secondary);">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </a>
+                    {% empty %}
+                        <div class="empty-state">
+                            <p>No recent chat sessions.</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="{% static 'js/theme.js' %}"></script>
+</body>
+</html>

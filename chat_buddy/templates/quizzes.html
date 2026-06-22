@@ -1,0 +1,541 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LearnBuddy - Quizzes</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/chat-new.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboard-apps.css' %}">
+    <style>
+        .modal-upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.01);
+            margin-top: 0.25rem;
+        }
+        .modal-upload-zone:hover {
+            border-color: var(--primary);
+            background: var(--primary-muted);
+        }
+        .modal-upload-zone svg {
+            color: var(--text-secondary);
+            transition: var(--transition);
+        }
+        .modal-upload-zone:hover svg {
+            color: var(--primary);
+        }
+        .modal-upload-zone .upload-label {
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+        .modal-upload-zone .upload-sublabel {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .modal-upload-zone.dragover {
+            border-color: var(--primary);
+            background: var(--primary-muted);
+        }
+    </style>
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            if (savedTheme === 'light') {
+                document.documentElement.classList.add('light-mode');
+            }
+        })();
+    </script>
+</head>
+<body style="overflow: hidden;">
+    <header class="main-header">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <a href="{% url 'dashboard' %}" class="logo" style="text-decoration: none; font-size: 1.4rem;">
+                <span>LearnBuddy</span>
+            </a>
+            <nav style="display: flex; gap: 1.5rem; align-items: center;">
+                <a href="{% url 'dashboard' %}" class="action-link" style="color: var(--text-secondary);">Dashboard</a>
+                <a href="{% url 'chat' %}" class="action-link" style="color: var(--text-secondary);">AI Chat</a>
+                <a href="{% url 'flashcards' %}" class="action-link" style="color: var(--text-secondary);">Flashcards</a>
+                <a href="{% url 'quizzes' %}" class="action-link" style="color: var(--primary); font-weight: 700;">Quizzes</a>
+            </nav>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <button id="themeToggleBtn" class="theme-toggle-btn" aria-label="Toggle Theme" style="background: none; border: none; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; justify-content: center; padding: 0.5rem; border-radius: 8px; transition: var(--transition);">
+                    <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">{{ user.first_name|default:user.username }}</span>
+                <a href="{% url 'logout' %}" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; border-radius: 8px;">Sign Out</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="chat-wrapper" style="height: calc(100vh - 65px); height: calc(100dvh - 65px);">
+        <aside class="sidebar open" style="border-right: 1px solid var(--border);">
+            <div class="sidebar-nav">
+                <button class="nav-btn" onclick="openCreateModal()" style="background: var(--primary);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    <span>Generate Quiz</span>
+                </button>
+            </div>
+            <div class="chat-list">
+                <h3 class="chat-list-title">Your Quizzes</h3>
+                <div class="chat-items" id="quizzesContainer">
+                    {% for quiz in quizzes %}
+                        <button class="chat-item" onclick="loadQuiz({{ quiz.id }})">
+                            <div class="chat-item-title">{{ quiz.title }}</div>
+                            <div class="chat-item-preview">
+                                {% if quiz.score is not null %}
+                                    Score: {{ quiz.score }}/${{ quiz.total_questions }}
+                                {% else %}
+                                    Not Started
+                                {% endif %}
+                            </div>
+                        </button>
+                    {% empty %}
+                        <div class="empty-state">
+                            <p>No quizzes created yet.</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </aside>
+
+        <main class="chat-main" style="padding: 2rem; justify-content: center; position: relative; overflow-y: auto;">
+            <div id="noQuizStage" class="welcome-section" style="display: flex;">
+                <div class="welcome-icon" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b;">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 11l3 3L22 4"/>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                </div>
+                <h2>Interactive Quizzes</h2>
+                <p>Select a quiz from the sidebar or generate a new quiz using your uploaded study material.</p>
+                <button class="btn btn-primary" onclick="openCreateModal()">Generate Quiz</button>
+            </div>
+
+            <div id="quizStage" class="quiz-container" style="display: none;">
+                <h2 id="quizTitle" style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; color: var(--text-primary);"></h2>
+                <div class="quiz-card">
+                    <div id="questionView">
+                        <div class="quiz-question-header">
+                            <h3 id="questionCounter">Question 1 / 5</h3>
+                            <span id="scoreTracker" style="font-size: 0.9rem; font-weight: 600; color: var(--text-secondary);">Score: 0</span>
+                        </div>
+                        <div class="question-text" id="questionText">Question goes here...</div>
+                        
+                        <div class="options-list">
+                            <button class="option-btn" onclick="selectOption('A')" id="optionA">
+                                <span class="option-letter">A</span>
+                                <span id="optionAText">Option A</span>
+                            </button>
+                            <button class="option-btn" onclick="selectOption('B')" id="optionB">
+                                <span class="option-letter">B</span>
+                                <span id="optionBText">Option B</span>
+                            </button>
+                            <button class="option-btn" onclick="selectOption('C')" id="optionC">
+                                <span class="option-letter">C</span>
+                                <span id="optionCText">Option C</span>
+                            </button>
+                            <button class="option-btn" onclick="selectOption('D')" id="optionD">
+                                <span class="option-letter">D</span>
+                                <span id="optionDText">Option D</span>
+                            </button>
+                        </div>
+
+                        <div class="explanation-panel" id="explanationPanel" style="display: none;">
+                            <div class="explanation-title" id="explanationTitle">Correct</div>
+                            <div class="explanation-text" id="explanationText">Explanation content goes here...</div>
+                        </div>
+
+                        <div class="quiz-footer">
+                            <button class="btn btn-primary" id="nextQuestionBtn" onclick="submitAnswer()" disabled>Submit Answer</button>
+                        </div>
+                    </div>
+
+                    <div id="resultsView" class="quiz-results" style="display: none;">
+                        <h2 style="font-size: 2rem; font-weight: 800;">Quiz Completed!</h2>
+                        <div class="results-score" id="finalScoreText">4 / 5</div>
+                        <div class="results-text" id="finalCommentText">Excellent job! You have a solid grasp of this study material.</div>
+                        <button class="btn btn-primary" onclick="openCreateModal()">Take Another Quiz</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-backdrop" id="createModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Generate Multiple Choice Quiz</h3>
+                <button class="modal-close" onclick="closeCreateModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Upload Study Material</label>
+                    <div class="modal-upload-zone" id="uploadZone" onclick="document.getElementById('fileUploadInput').click()">
+                        <input type="file" id="fileUploadInput" accept=".pdf,.docx,.txt,image/*" style="display: none;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <span class="upload-label" id="uploadInputLabel">Click or drag file here to upload</span>
+                        <span class="upload-sublabel">Supported: PDF, Images, DOCX, TXT</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="numQuestionsSelect">Number of Questions</label>
+                    <select id="numQuestionsSelect" class="form-select">
+                        <option value="5" selected>5 Questions</option>
+                        <option value="10">10 Questions</option>
+                        <option value="15">15 Questions</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCreateModal()">Cancel</button>
+                <button class="btn btn-primary" id="generateBtn" onclick="generateQuizSubmit()">Generate</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentQuiz = null;
+        let currentQuestionIndex = 0;
+        let currentScore = 0;
+        let selectedOptionLetter = null;
+        let hasSubmittedCurrent = false;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const uploadZone = document.getElementById('uploadZone');
+            const fileUploadInput = document.getElementById('fileUploadInput');
+            const uploadInputLabel = document.getElementById('uploadInputLabel');
+
+            if (uploadZone && fileUploadInput) {
+                uploadZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    uploadZone.classList.add('dragover');
+                });
+                uploadZone.addEventListener('dragleave', () => {
+                    uploadZone.classList.remove('dragover');
+                });
+                uploadZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    uploadZone.classList.remove('dragover');
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        fileUploadInput.files = files;
+                        updateFileLabel();
+                    }
+                });
+                fileUploadInput.addEventListener('change', () => {
+                    updateFileLabel();
+                });
+            }
+
+            function updateFileLabel() {
+                if (fileUploadInput.files.length > 0) {
+                    uploadInputLabel.innerText = fileUploadInput.files[0].name;
+                } else {
+                    uploadInputLabel.innerText = 'Click or drag file here to upload';
+                }
+            }
+        });
+
+        function openCreateModal() {
+            document.getElementById('createModal').classList.add('active');
+            const fileUploadInput = document.getElementById('fileUploadInput');
+            if (fileUploadInput) {
+                fileUploadInput.value = '';
+            }
+            const uploadInputLabel = document.getElementById('uploadInputLabel');
+            if (uploadInputLabel) {
+                uploadInputLabel.innerText = 'Click or drag file here to upload';
+            }
+        }
+
+        function closeCreateModal() {
+            document.getElementById('createModal').classList.remove('active');
+        }
+
+        function selectOption(letter) {
+            if (hasSubmittedCurrent) return;
+
+            selectedOptionLetter = letter;
+            
+            ['A', 'B', 'C', 'D'].forEach(l => {
+                const btn = document.getElementById(`option${l}`);
+                btn.classList.remove('selected');
+            });
+            
+            document.getElementById(`option${letter}`).classList.add('selected');
+            document.getElementById('nextQuestionBtn').disabled = false;
+        }
+
+        function submitAnswer() {
+            if (!hasSubmittedCurrent) {
+                hasSubmittedCurrent = true;
+                const question = currentQuiz.questions[currentQuestionIndex];
+                const isCorrect = selectedOptionLetter === question.correct_option;
+                
+                if (isCorrect) currentScore++;
+
+                const selectedBtn = document.getElementById(`option${selectedOptionLetter}`);
+                const correctBtn = document.getElementById(`option${question.correct_option}`);
+                
+                selectedBtn.classList.remove('selected');
+                if (isCorrect) {
+                    selectedBtn.classList.add('correct');
+                    document.getElementById('explanationPanel').className = 'explanation-panel success';
+                    document.getElementById('explanationTitle').innerText = 'Correct!';
+                } else {
+                    selectedBtn.classList.add('incorrect');
+                    correctBtn.classList.add('correct');
+                    document.getElementById('explanationPanel').className = 'explanation-panel error';
+                    document.getElementById('explanationTitle').innerText = `Incorrect (Correct answer is ${question.correct_option})`;
+                }
+                
+                document.getElementById('explanationText').innerText = question.explanation;
+                document.getElementById('explanationPanel').style.display = 'block';
+                document.getElementById('scoreTracker').innerText = `Score: ${currentScore}`;
+                
+                const nextBtn = document.getElementById('nextQuestionBtn');
+                if (currentQuestionIndex === currentQuiz.questions.length - 1) {
+                    nextBtn.innerText = 'Finish Quiz';
+                } else {
+                    nextBtn.innerText = 'Next Question';
+                }
+            } else {
+                fetch(`/api/quizzes/submit/${currentQuiz.id}/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        question_index: currentQuestionIndex,
+                        user_answer: selectedOptionLetter
+                    })
+                });
+
+                if (currentQuestionIndex < currentQuiz.questions.length - 1) {
+                    currentQuestionIndex++;
+                    loadQuestionDisplay();
+                } else {
+                    finishQuiz();
+                }
+            }
+        }
+
+        function loadQuestionDisplay() {
+            hasSubmittedCurrent = false;
+            selectedOptionLetter = null;
+            document.getElementById('explanationPanel').style.display = 'none';
+            
+            ['A', 'B', 'C', 'D'].forEach(l => {
+                const btn = document.getElementById(`option${l}`);
+                btn.className = 'option-btn';
+            });
+
+            const question = currentQuiz.questions[currentQuestionIndex];
+            document.getElementById('questionText').innerText = question.question_text;
+            document.getElementById('optionAText').innerText = question.option_a;
+            document.getElementById('optionBText').innerText = question.option_b;
+            document.getElementById('optionCText').innerText = question.option_c;
+            document.getElementById('optionDText').innerText = question.option_d;
+            
+            document.getElementById('questionCounter').innerText = `Question ${currentQuestionIndex + 1} / ${currentQuiz.questions.length}`;
+            document.getElementById('nextQuestionBtn').disabled = true;
+            document.getElementById('nextQuestionBtn').innerText = 'Submit Answer';
+        }
+
+        function finishQuiz() {
+            fetch(`/api/quizzes/finish/${currentQuiz.id}/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({
+                    score: currentScore
+                })
+            }).then(() => loadQuizzesList());
+
+            document.getElementById('questionView').style.display = 'none';
+            document.getElementById('resultsView').style.display = 'block';
+            document.getElementById('finalScoreText').innerText = `${currentScore} / ${currentQuiz.questions.length}`;
+            
+            let percent = (currentScore / currentQuiz.questions.length) * 100;
+            let comment = "Keep practicing! Every mistake is a step forward in learning.";
+            if (percent === 100) comment = "Perfect score! You have fully mastered this material.";
+            else if (percent >= 80) comment = "Excellent job! You have a very strong understanding of the content.";
+            else if (percent >= 50) comment = "Good effort! Review the study materials once more to solidify your knowledge.";
+            
+            document.getElementById('finalCommentText').innerText = comment;
+        }
+
+        function loadQuiz(quizId) {
+            fetch(`/api/quizzes/quiz/${quizId}/`)
+                .then(res => res.json())
+                .then(data => {
+                    currentQuiz = data;
+                    currentQuestionIndex = 0;
+                    currentScore = 0;
+                    document.getElementById('scoreTracker').innerText = 'Score: 0';
+                    document.getElementById('quizTitle').innerText = data.title;
+                    document.getElementById('noQuizStage').style.display = 'none';
+                    document.getElementById('quizStage').style.display = 'block';
+                    document.getElementById('questionView').style.display = 'block';
+                    document.getElementById('resultsView').style.display = 'none';
+                    loadQuestionDisplay();
+                })
+                .catch(err => alert('Failed to load quiz.'));
+        }
+
+        async function generateQuizSubmit() {
+            const fileInput = document.getElementById('fileUploadInput');
+            const count = document.getElementById('numQuestionsSelect').value;
+            
+            if (!fileInput || fileInput.files.length === 0) {
+                alert('Please upload/select study material first.');
+                return;
+            }
+
+            const generateBtn = document.getElementById('generateBtn');
+            generateBtn.disabled = true;
+            generateBtn.innerText = 'Uploading...';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                // Step 1: Upload the file
+                const uploadRes = await fetch('/api/upload/', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: formData
+                });
+
+                if (!uploadRes.ok) {
+                    const errorData = await uploadRes.json();
+                    throw new Error(errorData.error || 'Failed to upload study material.');
+                }
+
+                const uploadData = await uploadRes.json();
+                const materialId = uploadData.id;
+
+                // Step 2: Generate the quiz
+                generateBtn.innerText = 'Generating...';
+                const generateRes = await fetch('/api/quizzes/generate/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        material_id: materialId,
+                        count: count
+                    })
+                });
+
+                if (!generateRes.ok) {
+                    const errorData = await generateRes.json();
+                    throw new Error(errorData.error || 'Failed to generate quiz.');
+                }
+
+                const generateData = await generateRes.json();
+                
+                closeCreateModal();
+                loadQuizzesList();
+                loadQuiz(generateData.quiz_id);
+
+            } catch (err) {
+                alert(err.message || 'An error occurred during quiz generation.');
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.innerText = 'Generate';
+            }
+        }
+
+        function loadQuizzesList() {
+            fetch('/api/quizzes/list/')
+                .then(res => res.json())
+                .then(data => {
+                    const container = document.getElementById('quizzesContainer');
+                    container.innerHTML = '';
+                    if (data.quizzes.length === 0) {
+                        container.innerHTML = '<div class="empty-state"><p>No quizzes created yet.</p></div>';
+                        return;
+                    }
+                    data.quizzes.forEach(quiz => {
+                        let scoreStr = quiz.score !== null ? `Score: ${quiz.score}/${quiz.total}` : 'Not Started';
+                        container.innerHTML += `
+                            <button class="chat-item" onclick="loadQuiz(${quiz.id})">
+                                <div class="chat-item-title">${quiz.title}</div>
+                                <div class="chat-item-preview">${scoreStr}</div>
+                            </button>
+                        `;
+                    });
+                });
+        }
+
+        (function() {
+            function sendHeartbeat() {
+                if (document.hidden) return;
+                if (!currentQuiz) return;
+                const payload = {
+                    activity_type: 'quiz',
+                    duration_seconds: 30
+                };
+                if (currentQuiz.study_material_id) {
+                    payload.study_material_id = currentQuiz.study_material_id;
+                }
+                fetch('/api/analytics/track/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify(payload)
+                }).catch(e => console.debug('Heartbeat ping failed'));
+            }
+            setInterval(sendHeartbeat, 30000);
+        })();
+    </script>
+    <script src="{% static 'js/theme.js' %}"></script>
+</body>
+</html>

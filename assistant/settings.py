@@ -15,37 +15,15 @@ from dotenv import load_dotenv
 import os
 import dj_database_url
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-skhujb8shttzz1ij74dhs4auh@7%@*c+*1+b_nqy&95p27)cor')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-# Default to True for development, set DEBUG=False in production environment
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-# Allow Railway domain, localhost, and custom domain
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '.up.railway.app',           # All Railway subdomains
-    'learnbuddy.up.railway.app', # Your specific Railway app
-    os.getenv('RAILWAY_STATIC_URL', '').replace('http://', '').replace('https://', '').split('/')[0] if os.getenv('RAILWAY_STATIC_URL') else '',
-    os.getenv('DOMAIN', '')  # Custom domain from env variable
-]
-ALLOWED_HOSTS = [h for h in ALLOWED_HOSTS if h]  # Remove empty strings
+ALLOWED_HOSTS = []
 
-# Trust Railway's SSL-terminating reverse proxy
-# Without this, SECURE_SSL_REDIRECT causes an infinite redirect loop on Railway
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-
-
-# Application definition
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -54,6 +32,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'rest_framework.authtoken',
     'chat_buddy'
 ]
 
@@ -91,9 +71,6 @@ load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
@@ -101,16 +78,15 @@ DATABASES = {
     )
 }
 
-
-# Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,
+        }
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
@@ -118,11 +94,10 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
+    {
+        'NAME': 'chat_buddy.validators.ComplexityValidator',
+    },
 ]
-
-
-# Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
 
 LANGUAGE_CODE = 'en-us'
 
@@ -132,35 +107,33 @@ USE_I18N = True
 
 USE_TZ = True
 
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.0/howto/static-files/
-
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [
     BASE_DIR / 'chat_buddy' / 'static'
 ]
-# Media files (user uploads)
+
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# Allow same-origin iframes (needed for inline document viewer)
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
-# WhiteNoise static file storage — Django 6.0 requires the STORAGES dict
-# (STATICFILES_STORAGE was removed in Django 4.2+ deprecation cycle)
 STORAGES = {
     "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage" if not DEBUG else "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
 
-# Security Settings for Production
 if not DEBUG:
+    CLOUDINARY_STORAGE = {
+        'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME'),
+        'API_KEY': os.getenv('CLOUDINARY_API_KEY'),
+        'API_SECRET': os.getenv('CLOUDINARY_API_SECRET'),
+    }
+    
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
@@ -175,10 +148,8 @@ if not DEBUG:
         'img-src': ("'self'", 'data:', 'https:'),
     }
 
-# Default auto field
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Logging
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

@@ -8,7 +8,6 @@ from django.test.utils import override_settings
 from .ai_service import ask_buddy
 from .models import ChatMessage, ChatSession
 
-
 @override_settings(ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'], SECURE_SSL_REDIRECT=False)
 class FileUploadViewTests(TestCase):
 	def setUp(self):
@@ -50,20 +49,3 @@ class FileUploadViewTests(TestCase):
 		self.assertEqual(payload['file_type'], 'document')
 		self.assertEqual(payload['summary'], 'Plain text summary')
 		summarize_document_mock.assert_called_once()
-
-
-class AskBuddySearchContextTests(TestCase):
-	def test_current_event_queries_include_non_wikipedia_search_context(self):
-		with patch('chat_buddy.ai_service.is_current_event_question', return_value=True) as is_current_event_question_mock, \
-			 patch('chat_buddy.ai_service.search_web', return_value={'news': [{'title': 'Headline'}]}) as search_web_mock, \
-			 patch('chat_buddy.ai_service.format_search_results_for_ai', return_value='REFERENCE BLOCK') as format_search_results_mock, \
-			 patch('chat_buddy.ai_service.is_chemistry_problem', return_value=False), \
-			 patch('chat_buddy.ai_service.model.generate_content', return_value=MagicMock(text='Fresh answer')) as generate_content_mock:
-			response = ask_buddy('What is happening in AI right now?')
-
-		self.assertEqual(response, 'Fresh answer')
-		prompt = generate_content_mock.call_args.args[0]
-		self.assertIn('REFERENCE BLOCK', prompt)
-		is_current_event_question_mock.assert_called_once()
-		search_web_mock.assert_called_once()
-		format_search_results_mock.assert_called_once()

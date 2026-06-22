@@ -1,4 +1,5 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from django.conf import settings
 import PyPDF2
 from PIL import Image
@@ -9,46 +10,25 @@ import tempfile
 import os
 import re
 
-# Try to import web search functionality, but don't fail if it's not available
-try:
-    from .web_service import search_web, format_search_results_for_ai, is_current_event_question
-    WEB_SEARCH_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: Web search not available: {e}")
-    WEB_SEARCH_AVAILABLE = False
-    
-    # Dummy fallback functions
-    def search_web(query, max_results=3):
-        return None
-    
-    def format_search_results_for_ai(results):
-        return ""
-    
-    def is_current_event_question(message):
-        return False
+WEB_SEARCH_AVAILABLE = False
 
-# Configure Tesseract path for Windows (optional - only if available)
-# Tesseract is no longer required - Gemini vision API is the primary method
 try:
-    # Try to find tesseract on system PATH first
+
     pytesseract.pytesseract.pytesseract_cmd = 'tesseract'
 except:
-    # If not in PATH, try the common Windows installation location
+
     try:
         pytesseract.pytesseract.pytesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
     except:
-        # Tesseract is optional - Gemini vision will be used instead
+
         print("Note: Tesseract not found. Gemini Vision API will be used for image/image-PDF processing.")
 
-# Initialize Google Generative AI with proper error handling
 google_api_key = getattr(settings, 'GOOGLE_API_KEY', None) or os.getenv('GOOGLE_API_KEY')
 if not google_api_key:
     print("WARNING: GOOGLE_API_KEY is not set. AI features will not work until it is configured.")
     google_api_key = 'not-configured'
 
-genai.configure(api_key=google_api_key)
-model = genai.GenerativeModel('gemini-2.5-flash')
-
+client = genai.Client(api_key=google_api_key)
 
 try:
     import sympy as sp
@@ -69,7 +49,6 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
     print("Warning: SciPy/NumPy not installed. pip install scipy numpy to enable physics/engineering solving.")
-
 
 try:
     import pint
@@ -94,55 +73,57 @@ _MATH_KEYWORDS = {
     'roots', 'zeros', 'gradient', 'divergence', 'curl',
 }
 
+def _has_whole_word(text: str, keywords: set) -> bool:
+    lower_text = text.lower()
+    words = set(re.findall(r'\b\w+\b', lower_text))
+    for kw in keywords:
+        if ' ' in kw:
+            if kw in lower_text:
+                return True
+        else:
+            if kw in words:
+                return True
+    return False
+
 def is_math_computation_problem(message: str) -> bool:
-    """Return True when the message is likely a math computation request."""
-    lower = message.lower()
-    if any(kw in lower for kw in _MATH_KEYWORDS):
+    if _has_whole_word(message, _MATH_KEYWORDS):
         return True
-    # Contains common math expressions
-    if re.search(r'[\^=√∫∑∏]|d/dx|\bx\b.*=|\bf\(x\)', lower):
+    if re.search(r'[\^=√∫∑∏]|d/dx|\bx\b.*=|\bf\(x\)', message.lower()):
         return True
     return False
 
-
-
 _PHYSICS_ENGINEERING_KEYWORDS = {
-    # Mechanics
+
     'velocity', 'acceleration', 'force', 'momentum', 'impulse', 'torque', 'angular',
     'friction', 'gravity', 'gravitational', 'kinematics', 'dynamics', 'statics',
     'projectile', 'trajectory', 'centripetal', 'centrifugal',
-    # Energy / Work / Power
+
     'kinetic energy', 'potential energy', 'joule', 'watt',
-    # Thermodynamics
+
     'temperature', 'heat', 'entropy', 'pressure', 'ideal gas',
     'thermodynamics', 'carnot', 'kelvin', 'celsius', 'boyle', 'charles',
-    # Electromagnetism
+
     'voltage', 'current', 'resistance', 'capacitance', 'inductance', 'impedance',
     'circuit', 'ohm', 'ampere', 'farad', 'henry', 'coulomb',
     'electric field', 'magnetic field', 'flux', 'electromagnetic',
-    # Waves / Optics
+
     'wavelength', 'frequency', 'amplitude', 'oscillation', 'resonance',
     'refraction', 'reflection', 'diffraction', 'interference', 'optics',
-    # Quantum / Modern
+
     'photon', 'quantum', 'relativity', 'nuclear',
-    # Engineering
+
     'stress', 'strain', 'modulus', 'elasticity', 'shear', 'bending',
     'resistor', 'capacitor', 'inductor', 'transistor', 'diode',
-    # Units (strong signal)
+
     'newton', 'pascal', 'hertz', 'tesla', 'siemens',
 }
 
 def is_physics_engineering_problem(message: str) -> bool:
-    """Return True when the message is likely a physics or engineering computation."""
-    lower = message.lower()
-    if any(kw in lower for kw in _PHYSICS_ENGINEERING_KEYWORDS):
+    if _has_whole_word(message, _PHYSICS_ENGINEERING_KEYWORDS):
         return True
-    # Unit patterns: "5 m/s", "3 kg", "10 N", "220 V"
     if re.search(r'\d+\s*(m/s|km/h|\bkg\b|m/s²|\bN\b|\bPa\b|\bJ\b|\bW\b|\bV\b|\bA\b|\bHz\b|rad/s)', message):
         return True
     return False
-
-
 
 _CHEMISTRY_KEYWORDS = {
     'mole', 'molar', 'molarity', 'molality', 'concentration',
@@ -162,12 +143,8 @@ _CHEMISTRY_KEYWORDS = {
 }
 
 def is_chemistry_problem(message: str) -> bool:
-    """Return True when the message is likely a chemistry computation."""
-    lower = message.lower()
-    if any(kw in lower for kw in _CHEMISTRY_KEYWORDS):
+    if _has_whole_word(message, _CHEMISTRY_KEYWORDS):
         return True
-
-    # Chemical formula heuristic: avoid matching simple acronyms like "AI" or "USA".
     formula_match = re.search(r'\b(?:[A-Z][a-z]?\d*){2,}\b', message)
     if formula_match:
         token = formula_match.group(0)
@@ -175,9 +152,7 @@ def is_chemistry_problem(message: str) -> bool:
         has_lower = any(ch.islower() for ch in token)
         if has_digit or has_lower:
             return True
-
     return False
-
 
 def solve_with_sympy(problem_description: str):
     """
@@ -196,14 +171,16 @@ def solve_with_sympy(problem_description: str):
             "- Output ONLY the raw Python code — no markdown fences, no prose.\n\n"
             f"Problem: {problem_description}"
         )
-        code_response = model.generate_content(code_prompt)
+        code_response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=code_prompt
+        )
         code = code_response.text.strip()
-        # Strip markdown code fences if Gemini wrapped the code anyway
+
         code = re.sub(r'^```(?:python)?\s*', '', code, flags=re.MULTILINE)
         code = re.sub(r'```\s*$', '', code, flags=re.MULTILINE)
         code = code.strip()
 
-        # Execute in an isolated namespace (sympy is the only extra import allowed)
         namespace = {'__builtins__': {
             'print': print, 'range': range, 'len': len, 'list': list,
             'dict': dict, 'set': set, 'tuple': tuple, 'int': int,
@@ -224,7 +201,6 @@ def solve_with_sympy(problem_description: str):
         print(f"SymPy solver error (non-blocking): {exc}")
         return None, None
 
-
 def solve_with_scipy_pint(problem_description: str):
     """
     Ask Gemini to generate SciPy/NumPy/Pint code for a physics or engineering
@@ -244,7 +220,10 @@ def solve_with_scipy_pint(problem_description: str):
             "- Output ONLY the raw Python code — no markdown fences, no prose.\n\n"
             f"Problem: {problem_description}"
         )
-        code_response = model.generate_content(code_prompt)
+        code_response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=code_prompt
+        )
         code = code_response.text.strip()
         code = re.sub(r'^```(?:python)?\s*', '', code, flags=re.MULTILINE)
         code = re.sub(r'```\s*$', '', code, flags=re.MULTILINE)
@@ -274,7 +253,6 @@ def solve_with_scipy_pint(problem_description: str):
         print(f"SciPy/Pint solver error (non-blocking): {exc}")
         return None
 
-
 def solve_chemistry(problem_description: str):
     """
     Ask Gemini to generate ChemPy/SciPy/NumPy code for a chemistry problem,
@@ -297,7 +275,10 @@ def solve_chemistry(problem_description: str):
             "- Output ONLY the raw Python code — no markdown fences, no prose.\n\n"
             f"Problem: {problem_description}"
         )
-        code_response = model.generate_content(code_prompt)
+        code_response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=code_prompt
+        )
         code = code_response.text.strip()
         code = re.sub(r'^```(?:python)?\s*', '', code, flags=re.MULTILINE)
         code = re.sub(r'```\s*$', '', code, flags=re.MULTILINE)
@@ -327,13 +308,11 @@ def solve_chemistry(problem_description: str):
         print(f"ChemPy solver error (non-blocking): {exc}")
         return None
 
-
 _SCANNER_WATERMARKS = [
     'camscanner', 'adobe scan', 'microsoft lens', 'genius scan', 'anyscanner',
     'tiny scanner', 'turbo scan', 'scanbot', 'docscanner',
     'scan with', 'scanned by', 'scanned with',
 ]
-
 
 def _strip_scanner_watermark_noise(text: str) -> str:
     """Remove common scanner watermark lines from OCR output."""
@@ -350,7 +329,6 @@ def _strip_scanner_watermark_noise(text: str) -> str:
         lowered = compact.lower()
         lowered_no_space = re.sub(r'\s+', '', lowered)
 
-        # Drop obvious scanner watermark lines and scanner-related promo links.
         if any(wm.replace(' ', '') in lowered_no_space for wm in _SCANNER_WATERMARKS):
             continue
         if 'scanner' in lowered and ('http' in lowered or '.com' in lowered or 'www.' in lowered):
@@ -359,7 +337,7 @@ def _strip_scanner_watermark_noise(text: str) -> str:
         cleaned_lines.append(line)
 
     cleaned_text = "\n".join(cleaned_lines)
-    # Collapse excessive blank lines after removing watermark rows.
+
     cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text).strip()
     return cleaned_text
 
@@ -371,17 +349,16 @@ def _is_meaningful_text(text: str, min_chars: int = 120) -> bool:
     cleaned = _strip_scanner_watermark_noise(text).lower()
     for watermark in _SCANNER_WATERMARKS:
         cleaned = cleaned.replace(watermark, '')
-    # Strip whitespace, punctuation and digits that were part of watermarks
+
     import re
     cleaned = re.sub(r'[\s\W\d]+', ' ', cleaned).strip()
     return len(cleaned) >= min_chars
-
 
 def extract_text_from_pdf(pdf_path):
     """Extract text content from PDF file with fallback to Gemini vision for image-based PDFs"""
     text = ""
     try:
-        # First try normal PDF text extraction (fast, for text-based PDFs)
+
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
             for page in pdf_reader.pages:
@@ -389,17 +366,14 @@ def extract_text_from_pdf(pdf_path):
                 if extracted:
                     text += extracted + "\n"
 
-        # Only accept the PyPDF2 result if it contains meaningful content
-        # (not just scanner watermarks like "CamScanner" repeated across pages)
         if text.strip() and _is_meaningful_text(text):
             return text
 
-        # Either no text, or only watermark noise — use Gemini Vision
         print("Text-based extraction yielded no meaningful content, falling back to Gemini Vision...")
         text = extract_text_from_pdf_with_gemini_vision(pdf_path)
 
     except Exception as e:
-        # If normal extraction fails, try Gemini vision
+
         print(f"PyPDF2 extraction error, falling back to Gemini vision: {str(e)}")
         try:
             text = extract_text_from_pdf_with_gemini_vision(pdf_path)
@@ -407,7 +381,6 @@ def extract_text_from_pdf(pdf_path):
             raise Exception(f"Failed to extract PDF text: {str(e2)}")
 
     return text if text.strip() else "Unable to extract text from this PDF."
-
 
 def extract_text_from_pdf_with_gemini_vision(pdf_path):
     """
@@ -478,7 +451,6 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
         long_words = sum(1 for w in words if len(w) >= 3)
         line_count = len([line for line in cleaned.splitlines() if line.strip()])
 
-        # Cap each component to avoid over-biasing extra-long pages.
         score = 0
         score += min(total_chars, 1200) // 8
         score += min(alnum_chars, 1000) // 10
@@ -490,14 +462,12 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
         """Generate ordered image variants for robust OCR on difficult scans."""
         variants = []
 
-        # Variant 1: balanced enhancement (default for most pages)
         v1 = page_img.convert('RGB')
         v1 = ImageEnhance.Contrast(v1).enhance(1.9)
         v1 = ImageEnhance.Sharpness(v1).enhance(2.2)
         v1 = ImageEnhance.Brightness(v1).enhance(1.08)
         variants.append(v1)
 
-        # Variant 2: dark-page rescue (strong brighten + autocontrast)
         v2 = page_img.convert('L')
         v2 = ImageOps.autocontrast(v2, cutoff=1)
         v2 = ImageEnhance.Brightness(v2).enhance(1.35)
@@ -505,7 +475,6 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
         v2 = v2.filter(ImageFilter.UnsharpMask(radius=1.8, percent=170, threshold=2))
         variants.append(v2.convert('RGB'))
 
-        # Variant 3: noisy/low-contrast rescue (denoise + threshold)
         v3 = page_img.convert('L').filter(ImageFilter.MedianFilter(size=3))
         v3 = ImageOps.autocontrast(v3, cutoff=2)
         v3 = v3.point(lambda p: 255 if p > 150 else 0)
@@ -530,12 +499,18 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
                 tmp_path = tmp.name
 
             with open(tmp_path, 'rb') as f:
-                img_data = base64.standard_b64encode(f.read()).decode('utf-8')
+                img_bytes = f.read()
 
-            response = model.generate_content([
-                PAGE_PROMPT,
-                {"mime_type": "image/jpeg", "data": img_data}
-            ])
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=[
+                    PAGE_PROMPT,
+                    types.Part.from_bytes(
+                        data=img_bytes,
+                        mime_type="image/jpeg",
+                    )
+                ]
+            )
             return response.text.strip() if response and response.text else ""
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -547,11 +522,9 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
         try:
             variants = _build_preprocessed_variants(img)
 
-            # Always try the balanced variant first.
             best_text = _extract_with_gemini(variants[0])
             best_score = _text_quality_score(best_text)
 
-            # Retry difficult pages only (blurry/dark/low-contrast outputs).
             if best_score < 65:
                 for variant in variants[1:]:
                     candidate_text = _extract_with_gemini(variant)
@@ -560,7 +533,6 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
                         best_text = candidate_text
                         best_score = candidate_score
 
-                    # Stop early when extraction is clearly strong enough.
                     if best_score >= 120:
                         break
 
@@ -571,7 +543,6 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
             print(f"Error processing page {idx + 1} with Gemini: {e}")
             return (idx, "")
 
-    # Process all pages IN PARALLEL (up to 5 concurrent Gemini calls)
     results = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(process_page, (idx, img)): idx
@@ -581,11 +552,9 @@ def extract_text_from_pdf_with_gemini_vision(pdf_path):
             if page_text:
                 results[idx] = page_text
 
-    # Reassemble in original page order
     full_text = "\n\n".join(results[i] for i in sorted(results))
     full_text = _strip_scanner_watermark_noise(full_text)
     return full_text if full_text.strip() else "No readable text found in this PDF."
-
 
 def is_tesseract_available():
     """Check if tesseract is installed and available"""
@@ -595,21 +564,17 @@ def is_tesseract_available():
     except:
         return False
 
-
 def extract_text_from_pdf_with_ocr(pdf_path):
     """DEPRECATED: Use extract_text_from_pdf_with_gemini_vision instead"""
     return extract_text_from_pdf_with_gemini_vision(pdf_path)
 
-
 def extract_text_from_image(image_path):
     """Extract text from image using Gemini's vision API (primary) or OCR fallback"""
     try:
-        # Primary method: Use Gemini's vision API for reliable text extraction
+
         with open(image_path, 'rb') as f:
-            import base64
-            img_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            img_bytes = f.read()
         
-        # Determine image type
         image_type = "image/jpeg"
         if image_path.lower().endswith('.png'):
             image_type = "image/png"
@@ -618,26 +583,29 @@ def extract_text_from_image(image_path):
         elif image_path.lower().endswith('.webp'):
             image_type = "image/webp"
         
-        response = model.generate_content([
-            (
-                "You are reading a scanned or photographed document/image.\n"
-                "Your task: extract ONLY the actual content created by the document author — "
-                "handwritten text, printed text, diagrams, tables, equations, labels, and captions.\n\n"
-                "IMPORTANT RULES:\n"
-                "1. IGNORE all scanner / app watermarks, logos, and branding. "
-                "This includes 'CamScanner', 'Adobe Scan', 'Microsoft Lens', "
-                "'AnyScanner', "
-                "any app name, website URL, or promotional overlay added by a scanning app.\n"
-                "2. Transcribe handwriting faithfully, preserving the original line breaks and structure.\n"
-                "3. If text is partially illegible, give your best reading and mark uncertain words with [?].\n"
-                "4. If it contains a diagram or chart, describe its structure and all labelled values.\n"
-                "5. Return only the transcribed content — no commentary or explanations."
-            ),
-            {
-                "mime_type": image_type,
-                "data": img_data,
-            }
-        ])
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                (
+                    "You are reading a scanned or photographed document/image.\n"
+                    "Your task: extract ONLY the actual content created by the document author — "
+                    "handwritten text, printed text, diagrams, tables, equations, labels, and captions.\n\n"
+                    "IMPORTANT RULES:\n"
+                    "1. IGNORE all scanner / app watermarks, logos, and branding. "
+                    "This includes 'CamScanner', 'Adobe Scan', 'Microsoft Lens', "
+                    "'AnyScanner', "
+                    "any app name, website URL, or promotional overlay added by a scanning app.\n"
+                    "2. Transcribe handwriting faithfully, preserving the original line breaks and structure.\n"
+                    "3. If text is partially illegible, give your best reading and mark uncertain words with [?].\n"
+                    "4. If it contains a diagram or chart, describe its structure and all labelled values.\n"
+                    "5. Return only the transcribed content — no commentary or explanations."
+                ),
+                types.Part.from_bytes(
+                    data=img_bytes,
+                    mime_type=image_type,
+                )
+            ]
+        )
         
         if response.text.strip():
             return _strip_scanner_watermark_noise(response.text)
@@ -646,7 +614,7 @@ def extract_text_from_image(image_path):
             
     except Exception as e:
         print(f"Gemini vision failed: {e}")
-        # Fallback to Tesseract if available
+
         try:
             if is_tesseract_available():
                 image = Image.open(image_path)
@@ -658,19 +626,16 @@ def extract_text_from_image(image_path):
         
         return "Unable to extract text from this image. Try asking questions about it and I'll help analyze it!"
 
-
 def extract_text_from_word(doc_path):
     """Extract text from Word document (.docx or .doc)"""
     try:
         doc = Document(doc_path)
         text = ""
         
-        # Extract text from paragraphs
         for paragraph in doc.paragraphs:
             if paragraph.text.strip():
                 text += paragraph.text + "\n"
         
-        # Extract text from tables if present
         for table in doc.tables:
             for row in table.rows:
                 row_text = []
@@ -685,7 +650,6 @@ def extract_text_from_word(doc_path):
     except Exception as e:
         return f"Failed to extract text from Word document: {str(e)}"
 
-
 def extract_text_from_plain_text(text_path):
     """Extract text from a plain-text file."""
     try:
@@ -699,7 +663,6 @@ def extract_text_from_plain_text(text_path):
     except Exception as e:
         return f"Failed to extract text from text document: {str(e)}"
 
-
 def summarize_pdf(pdf_path, user_instruction=None):
     """
     Summarize PDF content with structured formatting using Google Gemini
@@ -710,7 +673,6 @@ def summarize_pdf(pdf_path, user_instruction=None):
         if not pdf_text.strip():
             return "Unable to extract text from this PDF. The document may be image-based or encrypted."
         
-        # Limit text length for API context window
         pdf_text = pdf_text[:15000]
         
         prompt = f"""You are LearnBuddy. Analyze this material and provide a STYLED summary.
@@ -747,14 +709,16 @@ In the course of summarizing documents, do not give the same response as the gen
         if user_instruction:
             prompt += f"\n\n**User's specific request:** {user_instruction}\nMake sure to address this specific request directly in your response."
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
         result = response.text
         print(f"Successfully summarized PDF using Google Gemini 2.5 Flash")
         return result
         
     except Exception as e:
         return f"I processed the PDF, but encountered an issue generating a detailed summary. Error: {str(e)}"
-
 
 def summarize_image(image_path, user_instruction=None):
     """
@@ -766,7 +730,6 @@ def summarize_image(image_path, user_instruction=None):
         if not image_text.strip():
             return "Unable to extract text from this image. The image may be too blurry or contain no readable text."
         
-        # Limit text length for API context window
         image_text = image_text[:8000]
         
         prompt = f"""You are LearnBuddy. Analyze this text extracted from an image and provide a STYLED summary.
@@ -798,14 +761,16 @@ Format in a friendly, helpful tone. Be clear and precise in your explanation."""
         if user_instruction:
             prompt += f"\n\n**User's specific request:** {user_instruction}\nMake sure to address this specific request directly in your response."
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
         result = response.text
         print(f"Successfully analyzed image using Google Gemini 2.5 Flash")
         return result
         
     except Exception as e:
         return f"I processed the image, but encountered an issue generating a summary. Error: {str(e)}"
-
 
 def summarize_document(doc_path, user_instruction=None):
     """
@@ -820,7 +785,6 @@ def summarize_document(doc_path, user_instruction=None):
         if not doc_text.strip() or "Failed to extract" in doc_text:
             return doc_text if doc_text else "Unable to extract text from this document."
         
-        # Limit text length for API context window
         doc_text = doc_text[:8000]
         
         prompt = f"""You are LearnBuddy. Analyze this text extracted from a Word document and provide a STYLED summary.
@@ -856,7 +820,10 @@ Format in a friendly, helpful tone. Be clear and precise in your explanation."""
         if user_instruction:
             prompt += f"\n\n**User's specific request:** {user_instruction}\nMake sure to address this specific request directly in your response."
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
         result = response.text
         print(f"Successfully summarized document using Google Gemini 2.5 Flash")
         return result
@@ -864,14 +831,12 @@ Format in a friendly, helpful tone. Be clear and precise in your explanation."""
     except Exception as e:
         return f"I processed the document, but encountered an issue generating a summary. Error: {str(e)}"
 
-
 def generate_session_title(user_message: str, assistant_response: str) -> str:
     """
     Generate a concise 4-6 word title that captures what the conversation is about.
     Called once after the first exchange so the title reflects the actual topic.
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = (
             "Based on this conversation exchange, write a short chat title of 4 to 6 words max. "
             "The title should capture the main topic clearly. "
@@ -879,13 +844,15 @@ def generate_session_title(user_message: str, assistant_response: str) -> str:
             f"User: {user_message[:300]}\n"
             f"Assistant: {assistant_response[:300]}"
         )
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
         title = response.text.strip().strip('"\'')
-        # Trim to 80 chars just in case
+
         return title[:80] if title else ''
     except Exception:
         return ''
-
 
 def ask_buddy(user_message, conversation_history=None, material_context=None, 
               system_context=None, is_religion_topic=False, file=None):
@@ -895,7 +862,7 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
     """
     try:
         system_message = """You are LearnBuddy. Your personality:
-1. RELIGIOUS TOPICS: Give clear and logical answers to whatever religious question. either christian, islamic, or whatever religion even down to atheism and buddhism and the rest.
+1. RELIGIOUS TOPICS: Give clear and logical answers, backed up by the scripture/Bible and Quran to whatever religious question. either christian, islamic, or whatever religion even down to atheism and buddhism and the rest.
 2. EDUCATIONAL CONTENT: Break down complex topics using bullet points and headers.
 3. GENERAL TONE: Friendly and organized. Always use double line breaks between ideas.
 4. MATHEMATICS: For ALL mathematical content you MUST:
@@ -913,24 +880,10 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         if system_context:
             system_message = system_context
         
-        # Check if user is asking about current events
         current_event_info = ""
-        if is_current_event_question(user_message):
-            try:
-                # Try to get reference information (Wikipedia for general knowledge)
-                search_results = search_web(user_message, max_results=3)
-                formatted_search_results = format_search_results_for_ai(search_results)
-                if formatted_search_results:
-                    current_event_info = formatted_search_results
-                    print(f"Found reference information for: {user_message}")
-            except Exception as e:
-                # Don't break the chat if search fails - just continue without it
-                print(f"Web search error (non-blocking): {e}")
 
-        # --------------- STEM verified solvers ---------------
         stem_context = ""
 
-        # 1. Math → SymPy (symbolic / exact)
         if is_math_computation_problem(user_message):
             sympy_plain, sympy_latex = solve_with_sympy(user_message)
             if sympy_plain:
@@ -941,24 +894,21 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
                 )
                 print(f"SymPy result for '{user_message[:60]}': {sympy_plain}")
 
-        # 2. Physics / Engineering → SciPy + Pint (numerical)
         if is_physics_engineering_problem(user_message):
             sci_result = solve_with_scipy_pint(user_message)
             if sci_result:
                 stem_context += f"SCIPY/PINT NUMERICAL RESULT (use this exact value):\n  {sci_result}\n\n"
                 print(f"SciPy result for '{user_message[:60]}': {sci_result}")
 
-        # 3. Chemistry → ChemPy + SciPy
         if is_chemistry_problem(user_message):
             chem_result = solve_chemistry(user_message)
             if chem_result:
                 stem_context += f"CHEMPY VERIFIED RESULT (use this exact value):\n  {chem_result}\n\n"
                 print(f"ChemPy result for '{user_message[:60]}': {chem_result}")
         
-        # Build conversation context
         conversation_text = ""
         if conversation_history:
-            for msg in conversation_history[-12:]:  # Last 12 messages for rich context
+            for msg in conversation_history[-12:]:
                 role = msg.get('role', 'user')
                 if 'parts' in msg:
                     content = msg['parts'][0] if msg['parts'] else ""
@@ -979,7 +929,6 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
                 if content:
                     conversation_text += f"{role}: {str(content)[:1000]}\n\n"
         
-        # Build full prompt
         full_prompt = system_message + "\n\n"
         
         if conversation_text:
@@ -999,10 +948,12 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         
         full_prompt += f"User: {user_message}\nAssistant:"
         
-        response = model.generate_content(full_prompt)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=full_prompt
+        )
         result = response.text
 
-        # Safety net: strip any leaked internal context block headers from the response
         _internal_block_pattern = re.compile(
             r'(?:SYMPY VERIFIED RESULT|SCIPY/PINT NUMERICAL RESULT|CHEMPY VERIFIED RESULT|STUDY MATERIAL CONTEXT)'
             r'[^\n]*\n(?:\s+[^\n]+\n)*',
@@ -1016,3 +967,58 @@ def ask_buddy(user_message, conversation_history=None, material_context=None,
         if is_religion_topic:
             return "I'm experiencing a technical issue. Please share a specific verse you'd like to discuss, or feel free to rephrase your question."
         return f"I'm here to help, but I encountered a technical issue. (Error: {str(e)})"
+
+from pydantic import BaseModel
+import json
+
+class FlashcardItem(BaseModel):
+    front: str
+    back: str
+
+class FlashcardDeckList(BaseModel):
+    title: str
+    cards: list[FlashcardItem]
+
+class QuizQuestionItem(BaseModel):
+    question_text: str
+    option_a: str
+    option_b: str
+    option_c: str
+    option_d: str
+    correct_option: str
+    explanation: str
+
+class QuizList(BaseModel):
+    title: str
+    questions: list[QuizQuestionItem]
+
+def generate_flashcards_ai(text_content: str, num_cards: int = 10):
+    prompt = (
+        f"You are a study helper. Based on this text, generate {num_cards} flashcards with front and back properties.\n\n"
+        f"Text Content:\n{text_content[:15000]}"
+    )
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=FlashcardDeckList,
+        ),
+    )
+    return json.loads(response.text)
+
+def generate_quiz_ai(text_content: str, num_questions: int = 5):
+    prompt = (
+        f"You are a study helper. Based on this text, generate a multiple-choice quiz of {num_questions} questions.\n"
+        "Each question must have 4 options (a, b, c, d), the correct option ('A', 'B', 'C', or 'D'), and a helpful explanation.\n\n"
+        f"Text Content:\n{text_content[:15000]}"
+    )
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=QuizList,
+        ),
+    )
+    return json.loads(response.text)

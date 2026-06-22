@@ -8,7 +8,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
-from .models import StudyMaterial, ChatSession, ChatMessage
+from .models import StudyMaterial, ChatSession, ChatMessage, FlashcardDeck, Flashcard, Quiz, QuizQuestion, StudySessionRecord
 from .ai_service import generate_session_title as _generate_title
 from .ai_service import summarize_pdf, summarize_image, summarize_document, ask_buddy
 from django.http import JsonResponse
@@ -20,9 +20,13 @@ from rest_framework.authtoken.models import Token
 import os
 import json
 import PyPDF2
+import datetime
+from django.utils import timezone
+from django.db.models import Sum
 
 def landing_view(request):
-    """Render the landing page with user context"""
+    if request.user.is_authenticated:
+        return redirect('dashboard')
     context = {
         'user': request.user,
         'is_authenticated': request.user.is_authenticated
@@ -31,7 +35,6 @@ def landing_view(request):
 
 @login_required(login_url='login')
 def chat_view(request):
-    """Render chat page with user context"""
     context = {
         'user': request.user,
         'is_authenticated': request.user.is_authenticated
@@ -39,18 +42,14 @@ def chat_view(request):
     return render(request, 'chat.html', context)
 
 def login_view(request):
-    """Handle login page - GET to display form, POST to authenticate"""
     if request.user.is_authenticated:
-        return redirect('chat')
+        return redirect('dashboard')
     
     if request.method == 'POST':
         username = request.POST.get('username')
         password = request.POST.get('password')
         
-        # Try to authenticate with username first
         user = authenticate(request, username=username, password=password)
-        
-        # If that fails, try with email as username
         if not user:
             try:
                 user_obj = User.objects.get(email=username)
@@ -60,16 +59,15 @@ def login_view(request):
         
         if user is not None:
             auth_login(request, user)
-            return redirect('chat')
+            return redirect('dashboard')
         else:
             messages.error(request, 'Invalid username/email or password.')
     
     return render(request, 'login.html')
 
 def signup_view(request):
-    """Handle signup page - GET to display form, POST to create user"""
     if request.user.is_authenticated:
-        return redirect('chat')
+        return redirect('dashboard')
     
     if request.method == 'POST':
         username = request.POST.get('username')
@@ -77,36 +75,36 @@ def signup_view(request):
         password = request.POST.get('password')
         password_confirm = request.POST.get('password_confirm')
         
-        # Validation
         if not all([username, email, password, password_confirm]):
             messages.error(request, 'Please fill in all fields.')
         elif password != password_confirm:
             messages.error(request, 'Passwords do not match.')
-        elif len(password) < 6:
-            messages.error(request, 'Password must be at least 6 characters long.')
         elif User.objects.filter(username=username).exists():
             messages.error(request, 'Username already exists.')
         elif User.objects.filter(email=email).exists():
             messages.error(request, 'Email already registered.')
         else:
-            # Create user
-            user = User.objects.create_user(username=username, email=email, password=password)
-            auth_login(request, user)
-            return redirect('chat')
+            from django.contrib.auth.password_validation import validate_password
+            from django.core.exceptions import ValidationError
+            try:
+                validate_password(password)
+                user = User.objects.create_user(username=username, email=email, password=password)
+                auth_login(request, user)
+                return redirect('dashboard')
+            except ValidationError as e:
+                for error in e.messages:
+                    messages.error(request, error)
     
     return render(request, 'signup.html')
 
 def logout_view(request):
-    """Handle logout"""
     auth_logout(request)
     messages.success(request, 'You have been logged out.')
     return redirect('landing')
 
-# API Endpoints for token-based authentication (for mobile/external clients)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_api(request):
-    """API endpoint to register a user and get authentication token"""
     username = request.data.get('username')
     email = request.data.get('email')
     password = request.data.get('password')
@@ -120,6 +118,13 @@ def register_api(request):
     if User.objects.filter(email=email).exists():
         return Response({'error': 'Email already registered'}, status=status.HTTP_400_BAD_REQUEST)
 
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+    try:
+        validate_password(password)
+    except ValidationError as e:
+        return Response({'error': e.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+
     user = User.objects.create_user(username=username, email=email, password=password)
     token, created = Token.objects.get_or_create(user=user)
     
@@ -132,7 +137,6 @@ def register_api(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_api(request):
-    """API endpoint to login a user and get authentication token"""
     username = request.data.get('username')
     password = request.data.get('password')
 
@@ -147,10 +151,8 @@ def login_api(request):
     
     return Response({'error': 'Invalid Credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
-
 @api_view(['GET'])
 def get_current_user(request):
-    """API endpoint to get current logged-in user's information"""
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'Not authenticated'}, status=401)
     
@@ -162,16 +164,12 @@ def get_current_user(request):
         'is_authenticated': True
     })
 
-
 @api_view(['GET'])
 def get_chat_history(request):
-    """Fetch all chat sessions with their messages for the current user"""
     try:
-        # Require authentication
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Not authenticated'}, status=401)
         
-        # Get ONLY current user's chat sessions ordered by creation date (newest first)
         sessions = ChatSession.objects.filter(user=request.user).order_by('-created_at')
         
         chat_data = []
@@ -182,6 +180,7 @@ def get_chat_history(request):
                 'title': session.title or '',
                 'created_at': session.created_at.isoformat(),
                 'material': session.study_material.file.name if session.study_material else None,
+                'material_id': session.study_material.id if session.study_material else None,
                 'material_url': session.study_material.file.url if session.study_material else None,
                 'material_type': session.study_material.file_type if session.study_material else None,
                 'messages': [
@@ -201,7 +200,6 @@ def get_chat_history(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_view(request):
@@ -215,6 +213,13 @@ def register_view(request):
     if User.objects.filter(username=username).exists():
         return Response({'error': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
 
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+    try:
+        validate_password(password)
+    except ValidationError as e:
+        return Response({'error': e.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+
     user = User.objects.create_user(username=username, email=email, password=password)
     token, created = Token.objects.get_or_create(user=user)
     
@@ -224,187 +229,23 @@ def register_view(request):
         'username': user.username
     }, status=status.HTTP_201_CREATED)
 
-@method_decorator(csrf_exempt, name='dispatch')
-class PDFUploadView(APIView):
-    parser_classes = (MultiPartParser, FormParser)
-    
-    def post(self, request, *args, **kwargs):
-        try:
-            pdf_file = request.FILES.get('pdf')
-            
-            if not pdf_file:
-                return Response({'error': 'No PDF file provided'}, 
-                              status=status.HTTP_400_BAD_REQUEST)
-            
-            if not pdf_file.name.lower().endswith('.pdf'):
-                return Response({'error': 'File must be a PDF'}, 
-                              status=status.HTTP_400_BAD_REQUEST)
-            
-            # Handle both in-memory and temporary files
-            if hasattr(pdf_file, 'temporary_file_path'):
-                pdf_path = pdf_file.temporary_file_path()
-            else:
-                # For in-memory files, save temporarily
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                    for chunk in pdf_file.chunks():
-                        tmp.write(chunk)
-                    pdf_path = tmp.name
-            
-            try:
-                # Extract page count
-                page_count = 0
-                try:
-                    with open(pdf_path, 'rb') as f:
-                        pdf_reader = PyPDF2.PdfReader(f)
-                        page_count = len(pdf_reader.pages)
-                except:
-                    page_count = "Unknown"
-                
-                # Get AI summary using Gemini
-                summary_response = summarize_pdf(pdf_path)
-                
-                # Parse the summary to extract key topics
-                key_topics = []
-                try:
-                    # Try to extract topics from summary
-                    if "topics:" in summary_response.lower():
-                        topics_section = summary_response.lower().split("topics:")[1].split("\n")[0]
-                        key_topics = [t.strip() for t in topics_section.split(",")][:5]
-                    else:
-                        # Generate basic topics from first few words
-                        words = summary_response.split()[:10]
-                        key_topics = [w for w in words if len(w) > 5][:3]
-                except:
-                    key_topics = ["Study Material", "Educational Content"]
-                
-                # Save to database
-                study_material = StudyMaterial.objects.create(
-                    file=pdf_file,
-                    file_type='pdf',
-                    summary=summary_response
-                )
-                
-                return Response({
-                    'id': study_material.id,
-                    'filename': pdf_file.name,
-                    'pages': page_count,
-                    'summary': summary_response,
-                    'key_topics': key_topics,
-                    'uploaded_at': study_material.uploaded_at.isoformat()
-                }, status=status.HTTP_201_CREATED)
-                
-            finally:
-                # Clean up temp file if we created one
-                if not hasattr(pdf_file, 'temporary_file_path'):
-                    try:
-                        os.unlink(pdf_path)
-                    except:
-                        pass
-            
-        except Exception as e:
-            return Response({
-                'error': f'Failed to process PDF: {str(e)}',
-                'details': 'Please ensure the PDF is not corrupted and try again.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@method_decorator(csrf_exempt, name='dispatch')
-class ImageUploadView(APIView):
-    parser_classes = (MultiPartParser, FormParser)
-    
-    def post(self, request, *args, **kwargs):
-        try:
-            image_file = request.FILES.get('image')
-            
-            if not image_file:
-                return Response({'error': 'No image file provided'}, 
-                              status=status.HTTP_400_BAD_REQUEST)
-            
-            # Check if file is an image
-            allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
-            if not any(image_file.name.lower().endswith(ext) for ext in allowed_extensions):
-                return Response({'error': 'File must be an image (JPG, PNG, GIF, BMP, WebP)'}, 
-                              status=status.HTTP_400_BAD_REQUEST)
-            
-            # Handle both in-memory and temporary files
-            if hasattr(image_file, 'temporary_file_path'):
-                image_path = image_file.temporary_file_path()
-            else:
-                # For in-memory files, save temporarily
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-                    for chunk in image_file.chunks():
-                        tmp.write(chunk)
-                    image_path = tmp.name
-            
-            try:
-                # Get AI summary using image OCR
-                summary_response = summarize_image(image_path)
-                
-                # Parse the summary to extract key topics
-                key_topics = []
-                try:
-                    words = summary_response.split()[:10]
-                    key_topics = [w for w in words if len(w) > 5][:3]
-                except:
-                    key_topics = ["Image Content", "Extracted Text"]
-                
-                # Save to database
-                study_material = StudyMaterial.objects.create(
-                    file=image_file,
-                    file_type='image',
-                    summary=summary_response
-                )
-                
-                return Response({
-                    'id': study_material.id,
-                    'filename': image_file.name,
-                    'summary': summary_response,
-                    'key_topics': key_topics,
-                    'uploaded_at': study_material.uploaded_at.isoformat()
-                }, status=status.HTTP_201_CREATED)
-                
-            finally:
-                # Clean up temp file if we created one
-                if not hasattr(image_file, 'temporary_file_path'):
-                    try:
-                        os.unlink(image_path)
-                    except:
-                        pass
-            
-        except Exception as e:
-            return Response({
-                'error': f'Failed to process image: {str(e)}',
-                'details': 'Please ensure the image is valid and try again.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 @api_view(['POST'])
 def chat_api(request):
     try:
-        # SECURITY: Require authentication
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Not authenticated'}, status=401)
         
-        # Get data from request
         user_message = request.data.get('message', '').strip()
         session_id = request.data.get('session_id')
         
         if not user_message:
             return JsonResponse({'error': 'Message is required'}, status=400)
         
-        # Check for Christian/Biblical content
         christian_keywords = ['god', 'jesus', 'christ', 'bible', 'scripture', 'prayer', 
                             'faith', 'christian', 'church', 'lord', 'salvation', 
                             'gospel', 'holy spirit', 'worship']
         is_christian_topic = any(keyword in user_message.lower() for keyword in christian_keywords)
         
-        # Check for inappropriate content
-        inappropriate_keywords = ['sex', 'porn', 'explicit', 'nsfw', 'nude']
-        is_inappropriate = any(keyword in user_message.lower() for keyword in inappropriate_keywords)
-        
-        # Get or create chat session
         session = None
         material = None
         material_context = None
@@ -416,19 +257,16 @@ def chat_api(request):
                     material = session.study_material
                     material_context = f"Document Context ({material.file.name}):\n{material.summary}"
             except ChatSession.DoesNotExist:
-                # Create new session if not found (only for current user)
                 session = ChatSession.objects.create(user=request.user)
         else:
-            # Create new session associated with current user
             session = ChatSession.objects.create(user=request.user)
         
-        # Build system context for AI
         system_context = """You are LearnBuddy, a friendly and helpful AI study assistant with EXPERT-LEVEL mathematics expertise. Your personality:
 
 0. GREETINGS & CASUAL MESSAGES: Always respond warmly to greetings like "hi", "hey", "hello", "heyy", "hii", "sup", "yo", etc.
    - Reply with a friendly greeting and briefly introduce yourself as LearnBuddy.
    - Invite the user to ask a question or share what they'd like to learn.
-   - Example: "Hey there! 👋 I'm LearnBuddy, your AI study companion. What would you like to learn or explore today?"
+   - Example: "Hey there! I'm LearnBuddy, your AI study companion. What would you like to learn or explore today?"
 
 1. RELIGIOUS TOPICS: Warm, knowledgeable, and encouraging for any faith tradition.
    - Provide Scripture references for Christian topics
@@ -475,46 +313,39 @@ def chat_api(request):
 
 5. GENERAL TONE: Friendly, encouraging, and helpful. ALWAYS produce a non-empty reply."""
 
-        if is_inappropriate:
-            response_text = "I'm designed to be a study assistant focused on educational content. I'd be happy to help you with academic materials, study questions, or discussions about faith and biblical principles. What can I help you learn about today?"
-        else:
-            # Build conversation history from database
-            conversation_history = []
-            db_messages = session.messages.order_by('created_at')[:30]  # Last 30 messages
-            
-            for msg in db_messages:
-                conversation_history.append({
-                    "role": msg.role if msg.role in ['user', 'assistant'] else 'user',
-                    "parts": [msg.content],
-                    "text": msg.content
-                })
-            
-            # Add enhanced context for Christian topics
-            if is_christian_topic:
-                system_context += "\n\nNOTE: This is a question about Christian faith. Provide a warm, biblically-grounded response with Scripture references."
-            
-            # Get AI response
-            try:
-                response_text = ask_buddy(
-                    user_message,
-                    conversation_history=conversation_history,
-                    material_context=material_context,
-                    system_context=system_context,
-                    is_religion_topic=is_christian_topic
-                )
-                # Guard against empty/None responses from the AI
-                if not response_text or not response_text.strip():
-                    response_text = "Hey there! 👋 I'm LearnBuddy, your AI study companion. Feel free to ask me anything — a subject, a problem, or just say what's on your mind!"
-            except Exception as e:
-                # Fallback response if AI service fails
-                if is_christian_topic:
-                    response_text = "That's a wonderful question about faith! While I'm having trouble accessing my full knowledge right now, I'd encourage you to explore the Scriptures directly. The Bible says in James 1:5, 'If any of you lacks wisdom, you should ask God, who gives generously to all without finding fault, and it will be given to you.' Could you rephrase your question, or would you like to discuss a specific Bible passage?"
-                elif material_context:
-                    response_text = "I understand you're asking about the material you uploaded. I'm having a brief technical issue, but I'm here to help! Could you please rephrase your question or be more specific about which section you'd like me to explain?"
-                else:
-                    response_text = "I'm experiencing a brief technical difficulty. Please try rephrasing your question, or if you have study materials, upload them so I can provide more specific help!"
+        conversation_history = []
+        db_messages = session.messages.order_by('created_at')[:30]
         
-        # Save messages to database
+        for msg in db_messages:
+            conversation_history.append({
+                "role": msg.role if msg.role in ['user', 'assistant'] else 'user',
+                "parts": [msg.content],
+                "text": msg.content
+            })
+        
+        if is_christian_topic:
+            system_context += "\n\nNOTE: This is a question about Christian faith. Provide a warm, biblically-grounded response with Scripture references."
+        
+        try:
+            response_text = ask_buddy(
+                user_message,
+                conversation_history=conversation_history,
+                material_context=material_context,
+                system_context=system_context,
+                is_religion_topic=is_christian_topic
+            )
+
+            if not response_text or not response_text.strip():
+                response_text = "Hey there! I'm LearnBuddy, your AI study companion. Feel free to ask me anything — a subject, a problem, or just say what's on your mind!"
+        except Exception as e:
+
+            if is_christian_topic:
+                response_text = "That's a wonderful question about faith! While I'm having trouble accessing my full knowledge right now, I'd encourage you to explore the Scriptures directly. The Bible says in James 1:5, 'If any of you lacks wisdom, you should ask God, who gives generously to all without finding fault, and it will be given to you.' Could you rephrase your question, or would you like to discuss a specific Bible passage?"
+            elif material_context:
+                response_text = "I understand you're asking about the material you uploaded. I'm having a brief technical issue, but I'm here to help! Could you please rephrase your question or be more specific about which section you'd like me to explain?"
+            else:
+                response_text = "I'm experiencing a brief technical difficulty. Please try rephrasing your question, or if you have study materials, upload them so I can provide more specific help!"
+        
         ChatMessage.objects.create(
             session=session,
             role='user',
@@ -527,11 +358,10 @@ def chat_api(request):
             content=response_text
         )
 
-        # Generate title after the very first exchange
         session_title = session.title or ''
         if not session_title:
-            msg_count = session.messages.count()  # now includes the two we just saved
-            if msg_count <= 2:
+            msg_count = session.messages.count()
+            if msg_count <= 4:
                 generated = _generate_title(user_message, response_text)
                 if generated:
                     session.title = generated
@@ -554,15 +384,13 @@ def chat_api(request):
             'details': str(e)
         }, status=500)
 
-
-# Unified file upload and summarization endpoint
 @method_decorator(csrf_exempt, name='dispatch')
 class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
     
     def post(self, request, *args, **kwargs):
         try:
-            # SECURITY: Require authentication
+
             if not request.user.is_authenticated:
                 return Response({'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
             
@@ -576,7 +404,6 @@ class FileUploadView(APIView):
             file_type = 'unknown'
             summary = ""
             
-            # Determine file type
             if filename.endswith('.pdf'):
                 file_type = 'pdf'
             elif filename.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')):
@@ -587,12 +414,11 @@ class FileUploadView(APIView):
                 return Response({'error': 'File type not supported. Please use PDF, images (JPG, PNG, GIF, BMP, WebP), DOCX, or TXT.'}, 
                               status=status.HTTP_400_BAD_REQUEST)
             
-            # Save file temporarily and process
             import tempfile
             temp_path = None
             
             try:
-                # Create temp file
+
                 if file_type == 'pdf':
                     suffix = '.pdf'
                 elif file_type == 'image':
@@ -607,16 +433,14 @@ class FileUploadView(APIView):
                         tmp.write(chunk)
                     temp_path = tmp.name
                 
-                # Process based on file type
                 user_message = request.data.get('user_message', '').strip()
                 if file_type == 'pdf':
                     summary = summarize_pdf(temp_path, user_instruction=user_message)
                 elif file_type == 'image':
                     summary = summarize_image(temp_path, user_instruction=user_message)
-                else:  # document (Word documents)
+                else:
                     summary = summarize_document(temp_path, user_instruction=user_message)
                 
-                # Save to database (associate with current user)
                 study_material = StudyMaterial.objects.create(
                     user=request.user,
                     file=uploaded_file,
@@ -624,8 +448,6 @@ class FileUploadView(APIView):
                     summary=summary
                 )
 
-                # Link material to the current chat session so follow-up questions
-                # can reference it.  Accept an optional session_id from the frontend.
                 session_id = request.data.get('session_id')
                 session = None
                 if session_id:
@@ -636,14 +458,12 @@ class FileUploadView(APIView):
                     except (ChatSession.DoesNotExist, ValueError):
                         session = None
 
-                # No active session yet - create one bound to this material
                 if not session:
                     session = ChatSession.objects.create(
                         user=request.user,
                         study_material=study_material
                     )
 
-                # Store the user's upload message so it appears in conversation history.
                 user_bubble = f"Attached: {uploaded_file.name}"
                 if user_message:
                     user_bubble += f"\n\n{user_message}"
@@ -653,13 +473,19 @@ class FileUploadView(APIView):
                     content=user_bubble
                 )
 
-                # Store the upload event as an assistant message so it appears in
-                # conversation history for future turns.
                 ChatMessage.objects.create(
                     session=session,
                     role='assistant',
                     content=f"[Uploaded file: {uploaded_file.name}]\n\nSummary:\n{summary}"
                 )
+
+                session_title = session.title or ''
+                if not session_title:
+                    generated = _generate_title(user_bubble, summary)
+                    if generated:
+                        session.title = generated
+                        session.save(update_fields=['title'])
+                        session_title = generated
 
                 return Response({
                     'id': study_material.id,
@@ -669,10 +495,11 @@ class FileUploadView(APIView):
                     'summary': summary,
                     'uploaded_at': study_material.uploaded_at,
                     'session_id': session.id,
+                    'session_title': session_title,
                 }, status=status.HTTP_201_CREATED)
                 
             finally:
-                # Clean up temp file
+
                 if temp_path and os.path.exists(temp_path):
                     try:
                         os.unlink(temp_path)
@@ -685,14 +512,13 @@ class FileUploadView(APIView):
             return Response({'error': f'Failed to process file: {str(e)}'}, 
                           status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @api_view(['POST'])
 def feedback_api(request, message_id):
     """Save thumbs-up / thumbs-down feedback on an assistant message."""
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'Not authenticated'}, status=401)
 
-    value = request.data.get('feedback')  # 'up' or 'down'
+    value = request.data.get('feedback')
     if value not in ('up', 'down'):
         return JsonResponse({'error': 'Invalid feedback value'}, status=400)
 
@@ -703,7 +529,6 @@ def feedback_api(request, message_id):
         return JsonResponse({'status': 'ok', 'feedback': value})
     except ChatMessage.DoesNotExist:
         return JsonResponse({'error': 'Message not found'}, status=404)
-
 
 @api_view(['POST'])
 def regenerate_api(request):
@@ -720,19 +545,16 @@ def regenerate_api(request):
     except ChatSession.DoesNotExist:
         return JsonResponse({'error': 'Session not found'}, status=404)
 
-    # Find and delete the last assistant message
     last_assistant = session.messages.filter(role='assistant').last()
     if last_assistant:
         last_assistant.delete()
 
-    # Find the last user message to replay
     last_user = session.messages.filter(role='user').last()
     if not last_user:
         return JsonResponse({'error': 'No user message to regenerate from'}, status=400)
 
     user_message = last_user.content
 
-    # Rebuild context (same logic as chat_api)
     material_context = None
     if session.study_material:
         material = session.study_material
@@ -741,7 +563,7 @@ def regenerate_api(request):
     christian_keywords = ['god', 'jesus', 'christ', 'bible', 'scripture', 'prayer',
                           'faith', 'christian', 'church', 'lord', 'salvation',
                           'gospel', 'holy spirit', 'worship']
-    is_christian_topic = any(kw in user_message.lower() for kw in christian_keywords)
+    is_religion_topic = any(kw in user_message.lower() for kw in christian_keywords)
 
     conversation_history = []
     for msg in session.messages.order_by('created_at')[:30]:
@@ -756,7 +578,7 @@ def regenerate_api(request):
             user_message,
             conversation_history=conversation_history,
             material_context=material_context,
-            is_religion_topic=is_christian_topic,
+            is_religion_topic=is_religion_topic,
         )
     except Exception as e:
         response_text = f"Sorry, I couldn't regenerate a response. (Error: {str(e)})"
@@ -772,3 +594,292 @@ def regenerate_api(request):
         'message_id': new_msg.id,
         'session_id': session.id,
     })
+
+@login_required(login_url='login')
+def dashboard_view(request):
+    materials = StudyMaterial.objects.filter(user=request.user)
+    sessions = ChatSession.objects.filter(user=request.user)
+    decks = FlashcardDeck.objects.filter(user=request.user)
+    quizzes = Quiz.objects.filter(user=request.user)
+    
+    today = timezone.now().date()
+    weekly_data = []
+    for i in range(6, -1, -1):
+        day = today - datetime.timedelta(days=i)
+        day_str = day.strftime('%a')
+        seconds = StudySessionRecord.objects.filter(
+            user=request.user,
+            date=day
+        ).aggregate(total=Sum('duration_seconds'))['total'] or 0
+        minutes = round(seconds / 60.0, 1)
+        weekly_data.append({
+            'day': day_str,
+            'minutes': minutes
+        })
+        
+    max_minutes = max([item['minutes'] for item in weekly_data] + [10])
+    for item in weekly_data:
+        item['percent'] = round((item['minutes'] / max_minutes) * 100.0)
+        
+    total_chat_secs = StudySessionRecord.objects.filter(
+        user=request.user,
+        activity_type='chat'
+    ).aggregate(total=Sum('duration_seconds'))['total'] or 0
+
+    total_flashcards_secs = StudySessionRecord.objects.filter(
+        user=request.user,
+        activity_type='flashcards'
+    ).aggregate(total=Sum('duration_seconds'))['total'] or 0
+
+    total_quiz_secs = StudySessionRecord.objects.filter(
+        user=request.user,
+        activity_type='quiz'
+    ).aggregate(total=Sum('duration_seconds'))['total'] or 0
+
+    total_secs = total_chat_secs + total_flashcards_secs + total_quiz_secs
+    if total_secs > 0:
+        chat_percent = round((total_chat_secs / total_secs) * 100.0)
+        flashcards_percent = round((total_flashcards_secs / total_secs) * 100.0)
+        quiz_percent = round((total_quiz_secs / total_secs) * 100.0)
+    else:
+        chat_percent = 0
+        flashcards_percent = 0
+        quiz_percent = 0
+        
+    total_study_minutes = round(total_secs / 60.0, 1)
+    
+    context = {
+        'materials_count': materials.count(),
+        'sessions_count': sessions.count(),
+        'decks_count': decks.count(),
+        'quizzes_count': quizzes.filter(score__isnull=False).count(),
+        'recent_materials': materials[:5],
+        'recent_sessions': sessions[:5],
+        'weekly_trend': weekly_data,
+        'chat_percent': chat_percent,
+        'flashcards_percent': flashcards_percent,
+        'quiz_percent': quiz_percent,
+        'chat_minutes': round(total_chat_secs / 60.0, 1),
+        'flashcards_minutes': round(total_flashcards_secs / 60.0, 1),
+        'quiz_minutes': round(total_quiz_secs / 60.0, 1),
+        'total_study_minutes': total_study_minutes,
+    }
+    return render(request, 'dashboard.html', context)
+
+@login_required(login_url='login')
+def flashcards_view(request):
+    decks = FlashcardDeck.objects.filter(user=request.user)
+    materials = StudyMaterial.objects.filter(user=request.user)
+    context = {
+        'decks': decks,
+        'materials': materials,
+    }
+    return render(request, 'flashcards.html', context)
+
+@login_required(login_url='login')
+def quizzes_view(request):
+    quizzes = Quiz.objects.filter(user=request.user)
+    materials = StudyMaterial.objects.filter(user=request.user)
+    context = {
+        'quizzes': quizzes,
+        'materials': materials,
+    }
+    return render(request, 'quizzes.html', context)
+
+@api_view(['POST'])
+def generate_flashcards_api(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    material_id = request.data.get('material_id')
+    count = int(request.data.get('count', 10))
+    try:
+        material = StudyMaterial.objects.get(id=material_id, user=request.user)
+    except StudyMaterial.DoesNotExist:
+        return JsonResponse({'error': 'Material not found'}, status=404)
+    try:
+        from .ai_service import generate_flashcards_ai
+        deck_data = generate_flashcards_ai(material.summary, num_cards=count)
+        deck = FlashcardDeck.objects.create(
+            user=request.user,
+            study_material=material,
+            title=deck_data.get('title', f"Flashcard Deck for {material.file.name}")
+        )
+        for item in deck_data.get('cards', []):
+            Flashcard.objects.create(
+                deck=deck,
+                front=item.get('front', ''),
+                back=item.get('back', '')
+            )
+        return JsonResponse({'deck_id': deck.id, 'title': deck.title})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+def list_flashcard_decks_api(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    decks = FlashcardDeck.objects.filter(user=request.user)
+    decks_data = []
+    for d in decks:
+        decks_data.append({
+            'id': d.id,
+            'title': d.title,
+            'count': d.cards.count(),
+            'created_at': d.created_at.isoformat()
+        })
+    return JsonResponse({'decks': decks_data})
+
+@api_view(['GET'])
+def get_flashcard_deck_api(request, deck_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    try:
+        deck = FlashcardDeck.objects.get(id=deck_id, user=request.user)
+        cards_data = []
+        for card in deck.cards.all():
+            cards_data.append({
+                'front': card.front,
+                'back': card.back
+            })
+        return JsonResponse({
+            'id': deck.id,
+            'title': deck.title,
+            'study_material_id': deck.study_material.id if deck.study_material else None,
+            'cards': cards_data
+        })
+    except FlashcardDeck.DoesNotExist:
+        return JsonResponse({'error': 'Deck not found'}, status=404)
+
+@api_view(['POST'])
+def generate_quiz_api(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    material_id = request.data.get('material_id')
+    count = int(request.data.get('count', 5))
+    try:
+        material = StudyMaterial.objects.get(id=material_id, user=request.user)
+    except StudyMaterial.DoesNotExist:
+        return JsonResponse({'error': 'Material not found'}, status=404)
+    try:
+        from .ai_service import generate_quiz_ai
+        quiz_data = generate_quiz_ai(material.summary, num_questions=count)
+        quiz = Quiz.objects.create(
+            user=request.user,
+            study_material=material,
+            title=quiz_data.get('title', f"Quiz for {material.file.name}"),
+            total_questions=len(quiz_data.get('questions', []))
+        )
+        for q in quiz_data.get('questions', []):
+            QuizQuestion.objects.create(
+                quiz=quiz,
+                question_text=q.get('question_text', ''),
+                option_a=q.get('option_a', ''),
+                option_b=q.get('option_b', ''),
+                option_c=q.get('option_c', ''),
+                option_d=q.get('option_d', ''),
+                correct_option=q.get('correct_option', 'A').upper(),
+                explanation=q.get('explanation', '')
+            )
+        return JsonResponse({'quiz_id': quiz.id, 'title': quiz.title})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+def list_quizzes_api(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    quizzes = Quiz.objects.filter(user=request.user)
+    quizzes_data = []
+    for q in quizzes:
+        quizzes_data.append({
+            'id': q.id,
+            'title': q.title,
+            'score': q.score,
+            'total': q.total_questions,
+            'created_at': q.created_at.isoformat()
+        })
+    return JsonResponse({'quizzes': quizzes_data})
+
+@api_view(['GET'])
+def get_quiz_api(request, quiz_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    try:
+        quiz = Quiz.objects.get(id=quiz_id, user=request.user)
+        questions_data = []
+        for q in quiz.questions.all():
+            questions_data.append({
+                'question_text': q.question_text,
+                'option_a': q.option_a,
+                'option_b': q.option_b,
+                'option_c': q.option_c,
+                'option_d': q.option_d,
+                'correct_option': q.correct_option,
+                'explanation': q.explanation
+            })
+        return JsonResponse({
+            'id': quiz.id,
+            'title': quiz.title,
+            'study_material_id': quiz.study_material.id if quiz.study_material else None,
+            'questions': questions_data
+        })
+    except Quiz.DoesNotExist:
+        return JsonResponse({'error': 'Quiz not found'}, status=404)
+
+@api_view(['POST'])
+def submit_quiz_answer_api(request, quiz_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    question_index = int(request.data.get('question_index', 0))
+    user_answer = request.data.get('user_answer', '').upper()
+    try:
+        quiz = Quiz.objects.get(id=quiz_id, user=request.user)
+        questions = list(quiz.questions.all())
+        if question_index < len(questions):
+            q = questions[question_index]
+            q.user_answer = user_answer
+            q.save()
+            return JsonResponse({'status': 'saved'})
+        return JsonResponse({'error': 'Invalid question index'}, status=400)
+    except Quiz.DoesNotExist:
+        return JsonResponse({'error': 'Quiz not found'}, status=404)
+
+@api_view(['POST'])
+def finish_quiz_api(request, quiz_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    score = int(request.data.get('score', 0))
+    try:
+        quiz = Quiz.objects.get(id=quiz_id, user=request.user)
+        quiz.score = score
+        quiz.save()
+        return JsonResponse({'status': 'finished'})
+    except Quiz.DoesNotExist:
+        return JsonResponse({'error': 'Quiz not found'}, status=404)
+
+@api_view(['POST'])
+def track_study_time_api(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    activity_type = request.data.get('activity_type')
+    material_id = request.data.get('study_material_id')
+    duration = int(request.data.get('duration_seconds', 30))
+    if activity_type not in ('chat', 'flashcards', 'quiz'):
+        return JsonResponse({'error': 'Invalid activity type'}, status=400)
+    today = timezone.now().date()
+    material = None
+    if material_id:
+        try:
+            material = StudyMaterial.objects.get(id=material_id, user=request.user)
+        except StudyMaterial.DoesNotExist:
+            pass
+    record, created = StudySessionRecord.objects.get_or_create(
+        user=request.user,
+        activity_type=activity_type,
+        study_material=material,
+        date=today,
+        defaults={'duration_seconds': 0}
+    )
+    record.duration_seconds += duration
+    record.save(update_fields=['duration_seconds'])
+    return JsonResponse({'status': 'success', 'total_duration_seconds': record.duration_seconds})

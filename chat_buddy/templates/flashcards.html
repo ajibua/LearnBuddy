@@ -1,0 +1,428 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LearnBuddy - Flashcard Decks</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/chat-new.css' %}">
+    <link rel="stylesheet" href="{% static 'css/dashboard-apps.css' %}">
+    <style>
+        .modal-upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.01);
+            margin-top: 0.25rem;
+        }
+        .modal-upload-zone:hover {
+            border-color: var(--primary);
+            background: var(--primary-muted);
+        }
+        .modal-upload-zone svg {
+            color: var(--text-secondary);
+            transition: var(--transition);
+        }
+        .modal-upload-zone:hover svg {
+            color: var(--primary);
+        }
+        .modal-upload-zone .upload-label {
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+        .modal-upload-zone .upload-sublabel {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .modal-upload-zone.dragover {
+            border-color: var(--primary);
+            background: var(--primary-muted);
+        }
+    </style>
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            if (savedTheme === 'light') {
+                document.documentElement.classList.add('light-mode');
+            }
+        })();
+    </script>
+</head>
+<body style="overflow: hidden;">
+    <header class="main-header">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <a href="{% url 'dashboard' %}" class="logo" style="text-decoration: none; font-size: 1.4rem;">
+                <span>LearnBuddy</span>
+            </a>
+            <nav style="display: flex; gap: 1.5rem; align-items: center;">
+                <a href="{% url 'dashboard' %}" class="action-link" style="color: var(--text-secondary);">Dashboard</a>
+                <a href="{% url 'chat' %}" class="action-link" style="color: var(--text-secondary);">AI Chat</a>
+                <a href="{% url 'flashcards' %}" class="action-link" style="color: var(--primary); font-weight: 700;">Flashcards</a>
+                <a href="{% url 'quizzes' %}" class="action-link" style="color: var(--text-secondary);">Quizzes</a>
+            </nav>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <button id="themeToggleBtn" class="theme-toggle-btn" aria-label="Toggle Theme" style="background: none; border: none; cursor: pointer; color: var(--text-primary); display: flex; align-items: center; justify-content: center; padding: 0.5rem; border-radius: 8px; transition: var(--transition);">
+                    <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">{{ user.first_name|default:user.username }}</span>
+                <a href="{% url 'logout' %}" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; border-radius: 8px;">Sign Out</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="chat-wrapper" style="height: calc(100vh - 65px); height: calc(100dvh - 65px);">
+        <aside class="sidebar open" style="border-right: 1px solid var(--border);">
+            <div class="sidebar-nav">
+                <button class="nav-btn" onclick="openCreateModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    <span>Generate Deck</span>
+                </button>
+            </div>
+            <div class="chat-list">
+                <h3 class="chat-list-title">Your Decks</h3>
+                <div class="chat-items" id="decksContainer">
+                    {% for deck in decks %}
+                        <button class="chat-item" onclick="loadDeck({{ deck.id }})">
+                            <div class="chat-item-title">{{ deck.title }}</div>
+                            <div class="chat-item-preview">{{ deck.cards.count }} cards</div>
+                        </button>
+                    {% empty %}
+                        <div class="empty-state">
+                            <p>No flashcard decks yet.</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </aside>
+
+        <main class="chat-main" style="padding: 2rem; justify-content: center; position: relative;">
+            <div id="noDeckStage" class="welcome-section" style="display: {% if active_deck %}none{% else %}flex{% endif %};">
+                <div class="welcome-icon" style="background: rgba(168, 85, 247, 0.2); color: #a855f7;">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="9" y1="3" x2="9" y2="21"/>
+                    </svg>
+                </div>
+                <h2>Interactive Flashcards</h2>
+                <p>Select a deck from the sidebar or generate a new deck using your uploaded study material.</p>
+                <button class="btn btn-primary" onclick="openCreateModal()">Generate Deck</button>
+            </div>
+
+            <div id="flashcardStage" class="flashcard-stage" style="display: {% if active_deck %}flex{% else %}none{% endif %};">
+                <h2 id="deckTitle" style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;"></h2>
+                <div class="flashcard-perspective" onclick="flipCard()">
+                    <div class="flashcard-card" id="flashcardCard">
+                        <div class="flashcard-side front">
+                            <div class="card-label">Front</div>
+                            <div class="card-text" id="cardFrontText">Question front goes here...</div>
+                        </div>
+                        <div class="flashcard-side back">
+                            <div class="card-label" style="color: #60a5fa;">Back</div>
+                            <div class="card-text" id="cardBackText">Answer back goes here...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-controls">
+                    <button class="control-btn" onclick="prevCard()" id="prevBtn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
+                    </button>
+                    <span class="progress-text" id="progressText">0 / 0</span>
+                    <button class="control-btn" onclick="nextCard()" id="nextBtn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-backdrop" id="createModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Generate Flashcard Deck</h3>
+                <button class="modal-close" onclick="closeCreateModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Upload Study Material</label>
+                    <div class="modal-upload-zone" id="uploadZone" onclick="document.getElementById('fileUploadInput').click()">
+                        <input type="file" id="fileUploadInput" accept=".pdf,.docx,.txt,image/*" style="display: none;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <span class="upload-label" id="uploadInputLabel">Click or drag file here to upload</span>
+                        <span class="upload-sublabel">Supported: PDF, Images, DOCX, TXT</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="numCardsSelect">Number of Cards</label>
+                    <select id="numCardsSelect" class="form-select">
+                        <option value="5">5 Cards</option>
+                        <option value="10" selected>10 Cards</option>
+                        <option value="15">15 Cards</option>
+                        <option value="20">20 Cards</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCreateModal()">Cancel</button>
+                <button class="btn btn-primary" id="generateBtn" onclick="generateDeckSubmit()">Generate</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentDeck = null;
+        let currentIndex = 0;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const uploadZone = document.getElementById('uploadZone');
+            const fileUploadInput = document.getElementById('fileUploadInput');
+            const uploadInputLabel = document.getElementById('uploadInputLabel');
+
+            if (uploadZone && fileUploadInput) {
+                uploadZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    uploadZone.classList.add('dragover');
+                });
+                uploadZone.addEventListener('dragleave', () => {
+                    uploadZone.classList.remove('dragover');
+                });
+                uploadZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    uploadZone.classList.remove('dragover');
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        fileUploadInput.files = files;
+                        updateFileLabel();
+                    }
+                });
+                fileUploadInput.addEventListener('change', () => {
+                    updateFileLabel();
+                });
+            }
+
+            function updateFileLabel() {
+                if (fileUploadInput.files.length > 0) {
+                    uploadInputLabel.innerText = fileUploadInput.files[0].name;
+                } else {
+                    uploadInputLabel.innerText = 'Click or drag file here to upload';
+                }
+            }
+        });
+
+        function openCreateModal() {
+            document.getElementById('createModal').classList.add('active');
+            const fileUploadInput = document.getElementById('fileUploadInput');
+            if (fileUploadInput) {
+                fileUploadInput.value = '';
+            }
+            const uploadInputLabel = document.getElementById('uploadInputLabel');
+            if (uploadInputLabel) {
+                uploadInputLabel.innerText = 'Click or drag file here to upload';
+            }
+        }
+
+        function closeCreateModal() {
+            document.getElementById('createModal').classList.remove('active');
+        }
+
+        function flipCard() {
+            document.getElementById('flashcardCard').classList.toggle('flipped');
+        }
+
+        function updateCardDisplay() {
+            if (!currentDeck || !currentDeck.cards || currentDeck.cards.length === 0) return;
+            
+            document.getElementById('flashcardCard').classList.remove('flipped');
+            
+            setTimeout(() => {
+                const card = currentDeck.cards[currentIndex];
+                document.getElementById('cardFrontText').innerText = card.front;
+                document.getElementById('cardBackText').innerText = card.back;
+                document.getElementById('progressText').innerText = `${currentIndex + 1} / ${currentDeck.cards.length}`;
+                
+                document.getElementById('prevBtn').disabled = currentIndex === 0;
+                document.getElementById('nextBtn').disabled = currentIndex === currentDeck.cards.length - 1;
+            }, 150);
+        }
+
+        function nextCard() {
+            if (currentIndex < currentDeck.cards.length - 1) {
+                currentIndex++;
+                updateCardDisplay();
+            }
+        }
+
+        function prevCard() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                updateCardDisplay();
+            }
+        }
+
+        function loadDeck(deckId) {
+            fetch(`/api/flashcards/deck/${deckId}/`)
+                .then(res => res.json())
+                .then(data => {
+                    currentDeck = data;
+                    currentIndex = 0;
+                    document.getElementById('deckTitle').innerText = data.title;
+                    document.getElementById('noDeckStage').style.display = 'none';
+                    document.getElementById('flashcardStage').style.display = 'flex';
+                    updateCardDisplay();
+                })
+                .catch(err => alert('Failed to load flashcard deck.'));
+        }
+
+        async function generateDeckSubmit() {
+            const fileInput = document.getElementById('fileUploadInput');
+            const count = document.getElementById('numCardsSelect').value;
+            
+            if (!fileInput || fileInput.files.length === 0) {
+                alert('Please upload/select study material first.');
+                return;
+            }
+
+            const generateBtn = document.getElementById('generateBtn');
+            generateBtn.disabled = true;
+            generateBtn.innerText = 'Uploading...';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                // Step 1: Upload the file
+                const uploadRes = await fetch('/api/upload/', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: formData
+                });
+
+                if (!uploadRes.ok) {
+                    const errorData = await uploadRes.json();
+                    throw new Error(errorData.error || 'Failed to upload study material.');
+                }
+
+                const uploadData = await uploadRes.json();
+                const materialId = uploadData.id;
+
+                // Step 2: Generate the deck
+                generateBtn.innerText = 'Generating...';
+                const generateRes = await fetch('/api/flashcards/generate/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({
+                        material_id: materialId,
+                        count: count
+                    })
+                });
+
+                if (!generateRes.ok) {
+                    const errorData = await generateRes.json();
+                    throw new Error(errorData.error || 'Failed to generate flashcard deck.');
+                }
+
+                const generateData = await generateRes.json();
+
+                closeCreateModal();
+                loadDecksList();
+                loadDeck(generateData.deck_id);
+
+            } catch (err) {
+                alert(err.message || 'An error occurred during generation.');
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.innerText = 'Generate';
+            }
+        }
+
+        function loadDecksList() {
+            fetch('/api/flashcards/list/')
+                .then(res => res.json())
+                .then(data => {
+                    const container = document.getElementById('decksContainer');
+                    container.innerHTML = '';
+                    if (data.decks.length === 0) {
+                        container.innerHTML = '<div class="empty-state"><p>No flashcard decks yet.</p></div>';
+                        return;
+                    }
+                    data.decks.forEach(deck => {
+                        container.innerHTML += `
+                            <button class="chat-item" onclick="loadDeck(${deck.id})">
+                                <div class="chat-item-title">${deck.title}</div>
+                                <div class="chat-item-preview">${deck.count} cards</div>
+                            </button>
+                        `;
+                    });
+                });
+        }
+
+        (function() {
+            function sendHeartbeat() {
+                if (document.hidden) return;
+                if (!currentDeck) return;
+                const payload = {
+                    activity_type: 'flashcards',
+                    duration_seconds: 30
+                };
+                if (currentDeck.study_material_id) {
+                    payload.study_material_id = currentDeck.study_material_id;
+                }
+                fetch('/api/analytics/track/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify(payload)
+                }).catch(e => console.debug('Heartbeat ping failed'));
+            }
+            setInterval(sendHeartbeat, 30000);
+        })();
+    </script>
+    <script src="{% static 'js/theme.js' %}"></script>
+</body>
+</html>
