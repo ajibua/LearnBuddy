@@ -16,7 +16,7 @@ class ComplexityValidator:
             )
         if not re.search(r'[^a-zA-Z0-9]', password):
             raise ValidationError(
-                _("The password must contain at least one special character (e.g., @, #, $, etc.)."),
+                _("The password must contain at least one special character (e.g., @, $, etc.)."),
                 code='password_no_special',
             )
 
