@@ -1,6 +1,0 @@
--r requirements.txt
-sympy
-scipy
-numpy
-pint
-chempy

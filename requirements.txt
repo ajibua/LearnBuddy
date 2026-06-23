@@ -5,6 +5,12 @@ django-cors-headers
 google-genai
 python-dotenv
 
+sympy
+scipy
+numpy
+pint
+chempy
+
 PyPDF2
 pytesseract
 python-docx
