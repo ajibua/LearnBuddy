@@ -24,7 +24,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-skhujb8shttzz1ij74dhs4auh@
 
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['learnbuddy-2hdm.onrender.com', '127.0.0.1']
+ALLOWED_HOSTS = ['learnbuddy-2hdm.onrender.com', '127.0.0.1', 'learn-buddy-two.vercel.app']
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
