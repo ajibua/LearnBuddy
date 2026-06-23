@@ -17,6 +17,9 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables early
+load_dotenv()
+
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-skhujb8shttzz1ij74dhs4auh@7%@*c+*1+b_nqy&95p27)cor')
 
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
@@ -67,15 +70,26 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'assistant.wsgi.application'
 
-load_dotenv()
-
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+db_config = dj_database_url.config(
+    default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+    conn_max_age=600,
+)
+
+if db_config.get('ENGINE') == 'django.db.backends.postgresql':
+    # Supabase uses Postgres and requires SSL.
+    db_config['OPTIONS'] = db_config.get('OPTIONS', {})
+    db_config['OPTIONS']['sslmode'] = 'require'
+    
+    # If using Supabase Connection Pooler (typically port 6543) in Transaction Mode:
+    # 1. Disable persistent connections by setting conn_max_age to 0.
+    # 2. Disable prepared statements by setting prepare_threshold to None.
+    db_config['CONN_MAX_AGE'] = 0
+    db_config['OPTIONS']['prepare_threshold'] = None
+
 DATABASES = {
-    'default': dj_database_url.config(
-        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
-        conn_max_age=600,
-    )
+    'default': db_config
 }
 
 AUTH_PASSWORD_VALIDATORS = [
