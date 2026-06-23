@@ -30,6 +30,44 @@ if not google_api_key:
 
 client = genai.Client(api_key=google_api_key)
 
+# Monkeypatch generate_content to handle rate limits, transient 503 errors,
+# and fall back to stable models under high demand.
+_original_generate_content = client.models.generate_content
+
+def generate_content_with_retry(*args, **kwargs):
+    import time
+    max_retries = 3
+    delay = 1
+    last_error = None
+    
+    # Extract and track the model being used
+    model = kwargs.get('model', 'gemini-2.5-flash')
+    current_model = model
+    
+    for attempt in range(max_retries):
+        try:
+            kwargs['model'] = current_model
+            return _original_generate_content(*args, **kwargs)
+        except Exception as e:
+            last_error = e
+            err_str = str(e).upper()
+            if attempt < max_retries - 1 and any(token in err_str for token in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "LIMIT")):
+                print(f"Gemini API returned error ({e}) for model {current_model}. Retrying in {delay}s...")
+                time.sleep(delay)
+                delay *= 2
+                # Fallback to stable models if the default is overloaded
+                if attempt == max_retries - 2:
+                    if current_model == 'gemini-2.5-flash':
+                        current_model = 'gemini-2.0-flash'
+                    elif current_model == 'gemini-2.0-flash':
+                        current_model = 'gemini-1.5-flash'
+            else:
+                raise e
+    if last_error:
+        raise last_error
+
+client.models.generate_content = generate_content_with_retry
+
 try:
     import sympy as sp
     SYMPY_AVAILABLE = True
