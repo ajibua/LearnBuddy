@@ -191,6 +191,15 @@
                         <span class="upload-sublabel">Supported: PDF, Images, DOCX, TXT</span>
                     </div>
                 </div>
+                <div class="form-group" style="margin-top: 1rem; margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">— OR CHOOSE EXISTING —</label>
+                    <select id="existingMaterialSelect" class="form-select">
+                        <option value="">-- Select Existing Material --</option>
+                        {% for material in materials %}
+                            <option value="{{ material.id }}">{{ material.file.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
                 <div class="form-group">
                     <label for="numCardsSelect">Number of Cards</label>
                     <select id="numCardsSelect" class="form-select">
@@ -258,6 +267,10 @@
             if (uploadInputLabel) {
                 uploadInputLabel.innerText = 'Click or drag file here to upload';
             }
+            const existingSelect = document.getElementById('existingMaterialSelect');
+            if (existingSelect) {
+                existingSelect.value = '';
+            }
         }
 
         function closeCreateModal() {
@@ -308,43 +321,60 @@
                     document.getElementById('noDeckStage').style.display = 'none';
                     document.getElementById('flashcardStage').style.display = 'flex';
                     updateCardDisplay();
+
+                    // Highlight active sidebar item
+                    const buttons = document.querySelectorAll('#decksContainer .chat-item');
+                    buttons.forEach(btn => {
+                        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(`loadDeck(${deckId})`)) {
+                            btn.classList.add('active');
+                        } else {
+                            btn.classList.remove('active');
+                        }
+                    });
                 })
                 .catch(err => alert('Failed to load flashcard deck.'));
         }
 
         async function generateDeckSubmit() {
             const fileInput = document.getElementById('fileUploadInput');
+            const existingSelect = document.getElementById('existingMaterialSelect');
             const count = document.getElementById('numCardsSelect').value;
             
-            if (!fileInput || fileInput.files.length === 0) {
-                alert('Please upload/select study material first.');
+            const selectedExistingId = existingSelect ? existingSelect.value : '';
+            const hasNewFile = fileInput && fileInput.files.length > 0;
+
+            if (!hasNewFile && !selectedExistingId) {
+                alert('Please upload a file or select an existing study material.');
                 return;
             }
 
             const generateBtn = document.getElementById('generateBtn');
             generateBtn.disabled = true;
-            generateBtn.innerText = 'Uploading...';
 
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
+            let materialId = selectedExistingId;
 
             try {
-                // Step 1: Upload the file
-                const uploadRes = await fetch('/api/upload/', {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: formData
-                });
+                if (hasNewFile) {
+                    generateBtn.innerText = 'Uploading...';
+                    const formData = new FormData();
+                    formData.append('file', fileInput.files[0]);
 
-                if (!uploadRes.ok) {
-                    const errorData = await uploadRes.json();
-                    throw new Error(errorData.error || 'Failed to upload study material.');
+                    const uploadRes = await fetch('/api/upload/', {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: formData
+                    });
+
+                    if (!uploadRes.ok) {
+                        const errorData = await uploadRes.json();
+                        throw new Error(errorData.error || 'Failed to upload study material.');
+                    }
+
+                    const uploadData = await uploadRes.json();
+                    materialId = uploadData.id;
                 }
-
-                const uploadData = await uploadRes.json();
-                const materialId = uploadData.id;
 
                 // Step 2: Generate the deck
                 generateBtn.innerText = 'Generating...';

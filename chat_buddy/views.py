@@ -807,20 +807,23 @@ def get_quiz_api(request, quiz_id):
     try:
         quiz = Quiz.objects.get(id=quiz_id, user=request.user)
         questions_data = []
-        for q in quiz.questions.all():
+        for q in quiz.questions.all().order_by('id'):
             questions_data.append({
+                'id': q.id,
                 'question_text': q.question_text,
                 'option_a': q.option_a,
                 'option_b': q.option_b,
                 'option_c': q.option_c,
                 'option_d': q.option_d,
                 'correct_option': q.correct_option,
-                'explanation': q.explanation
+                'explanation': q.explanation,
+                'user_answer': q.user_answer
             })
         return JsonResponse({
             'id': quiz.id,
             'title': quiz.title,
             'study_material_id': quiz.study_material.id if quiz.study_material else None,
+            'score': quiz.score,
             'questions': questions_data
         })
     except Quiz.DoesNotExist:
@@ -830,17 +833,30 @@ def get_quiz_api(request, quiz_id):
 def submit_quiz_answer_api(request, quiz_id):
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'Not authenticated'}, status=401)
-    question_index = int(request.data.get('question_index', 0))
+    question_id = request.data.get('question_id')
+    question_index = request.data.get('question_index')
     user_answer = request.data.get('user_answer', '').upper()
     try:
         quiz = Quiz.objects.get(id=quiz_id, user=request.user)
-        questions = list(quiz.questions.all())
-        if question_index < len(questions):
-            q = questions[question_index]
-            q.user_answer = user_answer
-            q.save()
-            return JsonResponse({'status': 'saved'})
-        return JsonResponse({'error': 'Invalid question index'}, status=400)
+        if question_id is not None:
+            try:
+                q = quiz.questions.get(id=int(question_id))
+                q.user_answer = user_answer
+                q.save()
+                return JsonResponse({'status': 'saved'})
+            except QuizQuestion.DoesNotExist:
+                return JsonResponse({'error': 'Question not found'}, status=404)
+        elif question_index is not None:
+            question_index = int(question_index)
+            questions = list(quiz.questions.all().order_by('id'))
+            if question_index < len(questions):
+                q = questions[question_index]
+                q.user_answer = user_answer
+                q.save()
+                return JsonResponse({'status': 'saved'})
+            return JsonResponse({'error': 'Invalid question index'}, status=400)
+        else:
+            return JsonResponse({'error': 'Either question_id or question_index is required'}, status=400)
     except Quiz.DoesNotExist:
         return JsonResponse({'error': 'Quiz not found'}, status=404)
 
@@ -848,12 +864,15 @@ def submit_quiz_answer_api(request, quiz_id):
 def finish_quiz_api(request, quiz_id):
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'Not authenticated'}, status=401)
-    score = int(request.data.get('score', 0))
     try:
         quiz = Quiz.objects.get(id=quiz_id, user=request.user)
-        quiz.score = score
+        actual_score = 0
+        for q in quiz.questions.all():
+            if q.user_answer == q.correct_option:
+                actual_score += 1
+        quiz.score = actual_score
         quiz.save()
-        return JsonResponse({'status': 'finished'})
+        return JsonResponse({'status': 'finished', 'score': actual_score})
     except Quiz.DoesNotExist:
         return JsonResponse({'error': 'Quiz not found'}, status=404)
 

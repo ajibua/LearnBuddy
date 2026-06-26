@@ -113,7 +113,7 @@
                             <div class="chat-item-title">{{ quiz.title }}</div>
                             <div class="chat-item-preview">
                                 {% if quiz.score is not null %}
-                                    Score: {{ quiz.score }}/${{ quiz.total_questions }}
+                                    Score: {{ quiz.score }}/{{ quiz.total_questions }}
                                 {% else %}
                                     Not Started
                                 {% endif %}
@@ -184,7 +184,11 @@
                         <h2 style="font-size: 2rem; font-weight: 800;">Quiz Completed!</h2>
                         <div class="results-score" id="finalScoreText">4 / 5</div>
                         <div class="results-text" id="finalCommentText">Excellent job! You have a solid grasp of this study material.</div>
-                        <button class="btn btn-primary" onclick="openCreateModal()">Take Another Quiz</button>
+                        <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1rem; flex-wrap: wrap;">
+                            <button class="btn btn-secondary" onclick="reviewQuiz()">Review Answers</button>
+                            <button class="btn btn-secondary" onclick="retakeQuiz()">Retake Quiz</button>
+                            <button class="btn btn-primary" onclick="openCreateModal()">New Quiz</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -214,6 +218,15 @@
                         <span class="upload-label" id="uploadInputLabel">Click or drag file here to upload</span>
                         <span class="upload-sublabel">Supported: PDF, Images, DOCX, TXT</span>
                     </div>
+                </div>
+                <div class="form-group" style="margin-top: 1rem; margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">— OR CHOOSE EXISTING —</label>
+                    <select id="existingMaterialSelect" class="form-select">
+                        <option value="">-- Select Existing Material --</option>
+                        {% for material in materials %}
+                            <option value="{{ material.id }}">{{ material.file.name }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
                 <div class="form-group">
                     <label for="numQuestionsSelect">Number of Questions</label>
@@ -284,6 +297,10 @@
             if (uploadInputLabel) {
                 uploadInputLabel.innerText = 'Click or drag file here to upload';
             }
+            const existingSelect = document.getElementById('existingMaterialSelect');
+            if (existingSelect) {
+                existingSelect.value = '';
+            }
         }
 
         function closeCreateModal() {
@@ -305,9 +322,10 @@
         }
 
         function submitAnswer() {
+            const question = currentQuiz.questions[currentQuestionIndex];
+            
             if (!hasSubmittedCurrent) {
                 hasSubmittedCurrent = true;
-                const question = currentQuiz.questions[currentQuestionIndex];
                 const isCorrect = selectedOptionLetter === question.correct_option;
                 
                 if (isCorrect) currentScore++;
@@ -315,16 +333,18 @@
                 const selectedBtn = document.getElementById(`option${selectedOptionLetter}`);
                 const correctBtn = document.getElementById(`option${question.correct_option}`);
                 
-                selectedBtn.classList.remove('selected');
-                if (isCorrect) {
-                    selectedBtn.classList.add('correct');
-                    document.getElementById('explanationPanel').className = 'explanation-panel success';
-                    document.getElementById('explanationTitle').innerText = 'Correct!';
-                } else {
-                    selectedBtn.classList.add('incorrect');
-                    correctBtn.classList.add('correct');
-                    document.getElementById('explanationPanel').className = 'explanation-panel error';
-                    document.getElementById('explanationTitle').innerText = `Incorrect (Correct answer is ${question.correct_option})`;
+                if (selectedBtn) {
+                    selectedBtn.classList.remove('selected');
+                    if (isCorrect) {
+                        selectedBtn.classList.add('correct');
+                        document.getElementById('explanationPanel').className = 'explanation-panel success';
+                        document.getElementById('explanationTitle').innerText = 'Correct!';
+                    } else {
+                        selectedBtn.classList.add('incorrect');
+                        if (correctBtn) correctBtn.classList.add('correct');
+                        document.getElementById('explanationPanel').className = 'explanation-panel error';
+                        document.getElementById('explanationTitle').innerText = `Incorrect (Correct answer is ${question.correct_option})`;
+                    }
                 }
                 
                 document.getElementById('explanationText').innerText = question.explanation;
@@ -333,28 +353,39 @@
                 
                 const nextBtn = document.getElementById('nextQuestionBtn');
                 if (currentQuestionIndex === currentQuiz.questions.length - 1) {
-                    nextBtn.innerText = 'Finish Quiz';
+                    if (currentQuiz.score !== null) {
+                        nextBtn.innerText = 'Back to Results';
+                    } else {
+                        nextBtn.innerText = 'Finish Quiz';
+                    }
                 } else {
                     nextBtn.innerText = 'Next Question';
                 }
             } else {
-                fetch(`/api/quizzes/submit/${currentQuiz.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: JSON.stringify({
-                        question_index: currentQuestionIndex,
-                        user_answer: selectedOptionLetter
-                    })
-                });
+                if (!question.user_answer) {
+                    question.user_answer = selectedOptionLetter;
+                    fetch(`/api/quizzes/submit/${currentQuiz.id}/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            question_id: question.id,
+                            user_answer: selectedOptionLetter
+                        })
+                    });
+                }
 
                 if (currentQuestionIndex < currentQuiz.questions.length - 1) {
                     currentQuestionIndex++;
                     loadQuestionDisplay();
                 } else {
-                    finishQuiz();
+                    if (currentQuiz.score !== null) {
+                        showResults();
+                    } else {
+                        finishQuiz();
+                    }
                 }
             }
         }
@@ -377,22 +408,50 @@
             document.getElementById('optionDText').innerText = question.option_d;
             
             document.getElementById('questionCounter').innerText = `Question ${currentQuestionIndex + 1} / ${currentQuiz.questions.length}`;
-            document.getElementById('nextQuestionBtn').disabled = true;
-            document.getElementById('nextQuestionBtn').innerText = 'Submit Answer';
+            
+            if (question.user_answer) {
+                hasSubmittedCurrent = true;
+                selectedOptionLetter = question.user_answer;
+                
+                const isCorrect = selectedOptionLetter === question.correct_option;
+                const selectedBtn = document.getElementById(`option${selectedOptionLetter}`);
+                const correctBtn = document.getElementById(`option${question.correct_option}`);
+                
+                if (selectedBtn) {
+                    if (isCorrect) {
+                        selectedBtn.classList.add('correct');
+                        document.getElementById('explanationPanel').className = 'explanation-panel success';
+                        document.getElementById('explanationTitle').innerText = 'Correct!';
+                    } else {
+                        selectedBtn.classList.add('incorrect');
+                        if (correctBtn) correctBtn.classList.add('correct');
+                        document.getElementById('explanationPanel').className = 'explanation-panel error';
+                        document.getElementById('explanationTitle').innerText = `Incorrect (Correct answer is ${question.correct_option})`;
+                    }
+                }
+                
+                document.getElementById('explanationText').innerText = question.explanation;
+                document.getElementById('explanationPanel').style.display = 'block';
+                
+                const nextBtn = document.getElementById('nextQuestionBtn');
+                nextBtn.disabled = false;
+                if (currentQuestionIndex === currentQuiz.questions.length - 1) {
+                    if (currentQuiz.score !== null) {
+                        nextBtn.innerText = 'Back to Results';
+                    } else {
+                        nextBtn.innerText = 'Finish Quiz';
+                    }
+                } else {
+                    nextBtn.innerText = 'Next Question';
+                }
+            } else {
+                const nextBtn = document.getElementById('nextQuestionBtn');
+                nextBtn.disabled = true;
+                nextBtn.innerText = 'Submit Answer';
+            }
         }
 
-        function finishQuiz() {
-            fetch(`/api/quizzes/finish/${currentQuiz.id}/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token }}'
-                },
-                body: JSON.stringify({
-                    score: currentScore
-                })
-            }).then(() => loadQuizzesList());
-
+        function showResults() {
             document.getElementById('questionView').style.display = 'none';
             document.getElementById('resultsView').style.display = 'block';
             document.getElementById('finalScoreText').innerText = `${currentScore} / ${currentQuiz.questions.length}`;
@@ -406,57 +465,128 @@
             document.getElementById('finalCommentText').innerText = comment;
         }
 
+        function reviewQuiz() {
+            currentQuestionIndex = 0;
+            document.getElementById('questionView').style.display = 'block';
+            document.getElementById('resultsView').style.display = 'none';
+            loadQuestionDisplay();
+        }
+
+        function retakeQuiz() {
+            currentQuiz.questions.forEach(q => {
+                q.user_answer = null;
+            });
+            currentQuestionIndex = 0;
+            currentScore = 0;
+            currentQuiz.score = null;
+            document.getElementById('scoreTracker').innerText = 'Score: 0';
+            document.getElementById('questionView').style.display = 'block';
+            document.getElementById('resultsView').style.display = 'none';
+            loadQuestionDisplay();
+        }
+
+        function finishQuiz() {
+            fetch(`/api/quizzes/finish/${currentQuiz.id}/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                }
+            }).then(res => res.json())
+              .then(data => {
+                  currentScore = data.score;
+                  currentQuiz.score = data.score;
+                  loadQuizzesList();
+                  showResults();
+              });
+        }
+
         function loadQuiz(quizId) {
             fetch(`/api/quizzes/quiz/${quizId}/`)
                 .then(res => res.json())
                 .then(data => {
                     currentQuiz = data;
-                    currentQuestionIndex = 0;
-                    currentScore = 0;
-                    document.getElementById('scoreTracker').innerText = 'Score: 0';
+                    
+                    // Highlight active sidebar item
+                    const buttons = document.querySelectorAll('#quizzesContainer .chat-item');
+                    buttons.forEach(btn => {
+                        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(`loadQuiz(${quizId})`)) {
+                            btn.classList.add('active');
+                        } else {
+                            btn.classList.remove('active');
+                        }
+                    });
+
                     document.getElementById('quizTitle').innerText = data.title;
                     document.getElementById('noQuizStage').style.display = 'none';
                     document.getElementById('quizStage').style.display = 'block';
-                    document.getElementById('questionView').style.display = 'block';
-                    document.getElementById('resultsView').style.display = 'none';
-                    loadQuestionDisplay();
+
+                    if (data.score !== null) {
+                        currentScore = data.score;
+                        showResults();
+                    } else {
+                        currentScore = 0;
+                        data.questions.forEach(q => {
+                            if (q.user_answer && q.user_answer === q.correct_option) {
+                                currentScore++;
+                            }
+                        });
+                        document.getElementById('scoreTracker').innerText = `Score: ${currentScore}`;
+                        
+                        let firstUnansweredIndex = data.questions.findIndex(q => !q.user_answer);
+                        if (firstUnansweredIndex === -1) {
+                            firstUnansweredIndex = 0;
+                        }
+                        currentQuestionIndex = firstUnansweredIndex;
+                        
+                        document.getElementById('questionView').style.display = 'block';
+                        document.getElementById('resultsView').style.display = 'none';
+                        loadQuestionDisplay();
+                    }
                 })
                 .catch(err => alert('Failed to load quiz.'));
         }
 
         async function generateQuizSubmit() {
             const fileInput = document.getElementById('fileUploadInput');
+            const existingSelect = document.getElementById('existingMaterialSelect');
             const count = document.getElementById('numQuestionsSelect').value;
             
-            if (!fileInput || fileInput.files.length === 0) {
-                alert('Please upload/select study material first.');
+            const selectedExistingId = existingSelect ? existingSelect.value : '';
+            const hasNewFile = fileInput && fileInput.files.length > 0;
+
+            if (!hasNewFile && !selectedExistingId) {
+                alert('Please upload a file or select an existing study material.');
                 return;
             }
 
             const generateBtn = document.getElementById('generateBtn');
             generateBtn.disabled = true;
-            generateBtn.innerText = 'Uploading...';
 
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
+            let materialId = selectedExistingId;
 
             try {
-                // Step 1: Upload the file
-                const uploadRes = await fetch('/api/upload/', {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    },
-                    body: formData
-                });
+                if (hasNewFile) {
+                    generateBtn.innerText = 'Uploading...';
+                    const formData = new FormData();
+                    formData.append('file', fileInput.files[0]);
 
-                if (!uploadRes.ok) {
-                    const errorData = await uploadRes.json();
-                    throw new Error(errorData.error || 'Failed to upload study material.');
+                    const uploadRes = await fetch('/api/upload/', {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: formData
+                    });
+
+                    if (!uploadRes.ok) {
+                        const errorData = await uploadRes.json();
+                        throw new Error(errorData.error || 'Failed to upload study material.');
+                    }
+
+                    const uploadData = await uploadRes.json();
+                    materialId = uploadData.id;
                 }
-
-                const uploadData = await uploadRes.json();
-                const materialId = uploadData.id;
 
                 // Step 2: Generate the quiz
                 generateBtn.innerText = 'Generating...';
@@ -503,8 +633,12 @@
                     }
                     data.quizzes.forEach(quiz => {
                         let scoreStr = quiz.score !== null ? `Score: ${quiz.score}/${quiz.total}` : 'Not Started';
+                        
+                        const isActive = currentQuiz && currentQuiz.id === quiz.id;
+                        const activeClass = isActive ? ' active' : '';
+                        
                         container.innerHTML += `
-                            <button class="chat-item" onclick="loadQuiz(${quiz.id})">
+                            <button class="chat-item${activeClass}" onclick="loadQuiz(${quiz.id})">
                                 <div class="chat-item-title">${quiz.title}</div>
                                 <div class="chat-item-preview">${scoreStr}</div>
                             </button>
